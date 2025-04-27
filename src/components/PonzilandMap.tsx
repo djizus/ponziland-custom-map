@@ -443,24 +443,27 @@ const displayCoordinates = (x: number | string, y: number | string): string => {
   return `(${formatCoordinate(x)}, ${formatCoordinate(y)})`;
 };
 
-const getValueColor = (price: string | null, ratio: number | null, symbol: string): string => {
-  if (!price) return '#2a2a2a';
+const getValueColor = (price: string | null, ratio: number | null, symbol: string, profitPerHour: number, landPriceESTRK: number): string => {
+  if (!price) return '#2a2a2a';  // No price = dark gray
   
-  // For eSTRK tokens, use the price directly
-  const estrkValue = symbol === 'eSTRK' 
-    ? Number(formatOriginalPrice(price))
-    : ratio ? Number(calculateESTRKPrice(price, ratio)) : 0;
+  // Calculate ROI
+  const roi = calculateROI(profitPerHour, landPriceESTRK);
   
-  // Dark mode friendly color palette - from cheap to expensive
-  // Using darker, more muted colors that still provide good contrast
-  if (estrkValue <= 5) return '#1b4d3e';     // Dark teal
-  if (estrkValue <= 20) return '#2d4d1b';    // Dark forest green
-  if (estrkValue <= 50) return '#4d4d1b';    // Dark olive
-  if (estrkValue <= 100) return '#4d3b1b';   // Dark bronze
-  if (estrkValue <= 500) return '#4d2d1b';   // Dark copper
-  if (estrkValue <= 1000) return '#4d1b1b';  // Dark crimson
-  if (estrkValue <= 5000) return '#3d1b4d';  // Dark purple
-  return '#1b1b4d';                          // Dark blue - most expensive
+  // Negative ROI = progression from dark orange to dark red
+  if (roi <= -100) return '#4d1515';  // Very negative ROI = dark red
+  if (roi <= -50) return '#4d2015';   // Highly negative ROI = dark red-orange
+  if (roi <= -25) return '#4d2515';   // Moderately negative ROI = darker orange
+  if (roi < 0) return '#4d3015';      // Slightly negative ROI = dark orange
+  
+  // Positive ROI = blue/green shades (dark mode friendly)
+  if (roi <= 25) return '#1b3d4d';    // Dark blue-green
+  if (roi <= 50) return '#1b4d4d';    // Darker teal
+  if (roi <= 100) return '#1b4d3d';   // Dark teal
+  if (roi <= 200) return '#1b4d2d';   // Blue-tinted forest green
+  if (roi <= 400) return '#1b4d1b';   // Dark forest green
+  if (roi <= 800) return '#2d4d1b';   // Rich forest green
+  if (roi <= 1600) return '#1b3d5d';  // Deep ocean blue
+  return '#1b2d6d';                   // Rich royal blue - highest ROI
 };
 
 interface TaxInfo {
@@ -746,10 +749,17 @@ const PonzilandMap = () => {
             const auction = activeAuctions[location];
             const isMyLand = land?.owner === userAddress;
             const { symbol, ratio } = getTokenInfo(land?.token_used || '', prices);
-            const valueColor = land ? getValueColor(land.sell_price, ratio, symbol) : '#1a1a1a';
             
             const taxInfo = calculateTaxInfo(location, gridData.tiles, prices, activeAuctions);
             const landPriceESTRK = land ? convertToESTRK(land.sell_price, symbol, ratio) : 0;
+            const valueColor = land ? getValueColor(
+              land.sell_price, 
+              ratio, 
+              symbol, 
+              taxInfo.profitPerHour,
+              landPriceESTRK
+            ) : '#1a1a1a';
+            
             const opportunityColor = getOpportunityColor(taxInfo.profitPerHour, landPriceESTRK);
 
             return (
@@ -791,11 +801,9 @@ const PonzilandMap = () => {
                                   {taxInfo.taxPaid > 0 && taxInfo.taxReceived > 0 && ' | '}
                                   {taxInfo.taxReceived > 0 && `+${taxInfo.taxReceived.toFixed(1)}`}
                                 </div>
-                                {taxInfo.profitPerHour > 0 && (
-                                  <div style={{ color: '#4CAF50' }}>
-                                    ROI: {calculateROI(taxInfo.profitPerHour, landPriceESTRK).toFixed(2)}%/h
-                                  </div>
-                                )}
+                                <div style={{ color: taxInfo.profitPerHour > 0 ? '#4CAF50' : '#ff6b6b' }}>
+                                  ROI: {calculateROI(taxInfo.profitPerHour, landPriceESTRK).toFixed(2)}%/h
+                                </div>
                               </>
                             )}
                           </>
