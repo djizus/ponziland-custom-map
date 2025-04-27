@@ -443,7 +443,7 @@ const displayCoordinates = (x: number | string, y: number | string): string => {
   return `(${formatCoordinate(x)}, ${formatCoordinate(y)})`;
 };
 
-const getValueColor = (price: string | null, ratio: number | null, symbol: string, profitPerHour: number, landPriceESTRK: number): string => {
+const getValueColor = (price: string | null, profitPerHour: number, landPriceESTRK: number): string => {
   if (!price) return '#2a2a2a';  // No price = dark gray
   
   // Calculate ROI
