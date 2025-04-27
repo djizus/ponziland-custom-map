@@ -754,8 +754,6 @@ const PonzilandMap = () => {
             const landPriceESTRK = land ? convertToESTRK(land.sell_price, symbol, ratio) : 0;
             const valueColor = land ? getValueColor(
               land.sell_price, 
-              ratio, 
-              symbol, 
               taxInfo.profitPerHour,
               landPriceESTRK
             ) : '#1a1a1a';
