@@ -95,15 +95,6 @@ const TileHeader = styled.div`
   text-align: center;
 `;
 
-const TileInfo = styled.div`
-  font-size: 12px;
-  color: #bbb;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 4px;
-`;
-
 const TileLocation = styled.div`
   position: absolute;
   top: 2px;
@@ -200,16 +191,6 @@ const getLevelNumber = (level: string | undefined): number => {
     case 'second': return 3;
     default: console.log(level); return 1;
   }
-};
-
-const formatSellPrice = (price: string | null): string => {
-  if (!price) return 'Not for sale';
-  const bigIntPrice = BigInt(price);
-  const divisor = BigInt('1000000000000000000'); // 18 decimals for eSTRK
-  const wholePart = bigIntPrice / divisor;
-  const fractionalPart = bigIntPrice % divisor;
-  const formattedFractional = fractionalPart.toString().padStart(18, '0').slice(0, 2);
-  return `${wholePart}${formattedFractional ? `.${formattedFractional}` : ''} eSTRK`;
 };
 
 const AddressInput = styled.div<{ $isMinimized: boolean }>`
@@ -449,11 +430,6 @@ const calculateESTRKPrice = (originalPrice: string | null, ratio: number | null)
   const price = Number(formatOriginalPrice(originalPrice));
   return (price / ratio).toFixed(2);
 };
-
-const PriceValue = styled.span`
-  color: #fff;
-  font-weight: bold;
-`;
 
 const formatCoordinate = (num: number | string): string => {
   if (typeof num === 'string') {
