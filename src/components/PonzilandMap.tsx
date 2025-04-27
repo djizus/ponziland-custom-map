@@ -1,6 +1,6 @@
 import { useQuery } from '@apollo/client';
-import { GET_PONZI_LANDS, GET_PONZI_LAND_AUCTIONS } from '../graphql/queries';
-import { PonziLand, PonziLandAuction } from '../types/ponziland';
+import { GET_PONZI_LANDS, GET_PONZI_LAND_AUCTIONS, GET_PONZI_LANDS_STAKE } from '../graphql/queries';
+import { PonziLand, PonziLandAuction, PonziLandStake } from '../types/ponziland';
 import styled from 'styled-components';
 import { useEffect, useState, useRef } from 'react';
 
@@ -40,6 +40,7 @@ const Tile = styled.div<{
   $valueColor: string;
   $isAuction: boolean;
   $opportunityColor: string;
+  $isNukable: boolean;
 }>`
   position: relative;
   width: 100px;
@@ -60,6 +61,9 @@ const Tile = styled.div<{
     if (props.$isAuction) {
       return '1px solid #cc66cc';
     }
+    if (props.$isNukable) {
+      return '2px solid #ff0000'; // Red border for nukable lands
+    }
     return `2px solid ${props.$opportunityColor}`;
   }};
   box-shadow: ${props => {
@@ -71,6 +75,9 @@ const Tile = styled.div<{
     }
     if (props.$isAuction) {
       return '0 0 5px rgba(204, 102, 204, 0.5)';
+    }
+    if (props.$isNukable) {
+      return '0 0 10px rgba(255, 0, 0, 0.3)'; // Red glow for nukable lands
     }
     if (props.$opportunityColor !== '#333') {
       return `0 0 10px ${props.$opportunityColor}`;
@@ -117,17 +124,6 @@ const TileLevel = styled.div`
   color: #fff;
 `;
 
-const AuctionBadge = styled.div`
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  font-size: 14px;
-  color: #fff;
-  text-align: center;
-  font-weight: bold;
-`;
-
 const GRID_SIZE = 64;
 
 // Convert location number to coordinates
@@ -138,12 +134,18 @@ const getCoordinates = (location: number | string): [string, string] => {
   return [x.toString(), y.toString()];
 };
 
-const processGridData = (lands: PonziLand[]) => {
+const processGridData = (lands: PonziLand[], stakes: PonziLandStake[]) => {
   const grid = Array(GRID_SIZE * GRID_SIZE).fill(null);
   let minRow = GRID_SIZE;
   let maxRow = 0;
   let minCol = GRID_SIZE;
   let maxCol = 0;
+
+  // Create a map of stakes by location
+  const stakesMap = stakes.reduce((acc, stake) => {
+    acc[Number(stake.location)] = stake.amount;
+    return acc;
+  }, {} as Record<number, string>);
 
   // First pass: find the boundaries of the land area
   lands.forEach(land => {
@@ -155,10 +157,13 @@ const processGridData = (lands: PonziLand[]) => {
     maxCol = Math.max(maxCol, Number(x));
   });
 
-  // Second pass: fill the grid
+  // Second pass: fill the grid with lands and their stake amounts
   lands.forEach(land => {
     const location = Number(land.location);
-    grid[location] = land;
+    grid[location] = {
+      ...land,
+      staked_amount: stakesMap[location] || '0x0'
+    };
   });
 
   // Create arrays of all rows and columns within the boundaries
@@ -170,11 +175,6 @@ const processGridData = (lands: PonziLand[]) => {
     { length: maxCol - minCol + 1 },
     (_, i) => minCol + i
   );
-
-  console.log('Active rows:', activeRows);
-  console.log('Active columns:', activeCols);
-  console.log('Row range:', minRow, 'to', maxRow);
-  console.log('Column range:', minCol, 'to', maxCol);
 
   return {
     tiles: grid,
@@ -623,12 +623,120 @@ const GameLink = styled.a`
   }
 `;
 
+// Function to calculate burn rate per hour in original token
+const calculateBurnRate = (land: PonziLand | null, lands: (PonziLand | null)[], activeAuctions: Record<number, PonziLandAuction>): number => {
+  if (!land || !land.sell_price) return 0;
+  
+  const neighbors = getNeighborLocations(Number(land.location));
+  const taxRate = getTaxRate(land.level);
+  let burnRate = 0;
+  
+  // Calculate burn rate using the same logic as tax calculation
+  neighbors.forEach(neighborLoc => {
+    const neighbor = lands[neighborLoc];
+    // Only count burn rate for neighbors that exist, are not on auction, and have an owner
+    if (neighbor && !activeAuctions[neighborLoc] && neighbor.owner) {
+      burnRate += hexToDecimal(land.sell_price) * taxRate;
+    }
+  });
+  
+  return burnRate;
+};
+
+const StakedInfo = styled.div<{ $isNukable: boolean }>`
+  position: absolute;
+  bottom: 2px;
+  left: 2px;
+  background: ${props => props.$isNukable ? 'rgba(255, 0, 0, 0.5)' : 'rgba(0, 0, 0, 0.5)'};
+  padding: 2px 4px;
+  border-radius: 3px;
+  font-size: 9px;
+  color: ${props => props.$isNukable ? '#ff9999' : '#fff'};
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+`;
+
+// Function to convert hex string to decimal
+const hexToDecimal = (hex: string): number => {
+  if (!hex || hex === '0x0') return 0;
+  return parseInt(hex, 16) / 1e18; // Assuming 18 decimals
+};
+
+// Function to check if a land is nukable (no staked tokens)
+const isNukable = (land: PonziLand | null): boolean => {
+  if (!land) return false;
+  const stakedAmount = hexToDecimal(land.staked_amount || '0x0');
+  return stakedAmount <= 0;
+};
+
+// Format time remaining showing only hours and minutes
+const formatTimeRemaining = (hours: number): string => {
+  if (hours <= 0) return 'NUKABLE';
+  
+  // Convert to minutes for better precision but round to whole minutes
+  const totalMinutes = Math.round(hours * 60);
+  
+  // Calculate hours and remaining minutes
+  const hoursLeft = Math.floor(totalMinutes / 60);
+  const minutesLeft = totalMinutes % 60;
+  
+  if (hoursLeft === 0) {
+    return `${minutesLeft}m`;
+  }
+  
+  return `${hoursLeft}h ${minutesLeft}m`;
+};
+
+// Calculate potential yield for an auction tile
+const calculatePotentialYield = (
+  location: number, 
+  lands: (PonziLand | null)[], 
+  prices: TokenPrice[],
+  activeAuctions: Record<number, PonziLandAuction>
+): number => {
+  const neighbors = getNeighborLocations(location);
+  let potentialYield = 0;
+
+  neighbors.forEach(neighborLoc => {
+    const neighbor = lands[neighborLoc];
+    // Only count yield from neighbors that exist, are not on auction, have an owner and are for sale
+    if (neighbor && !activeAuctions[neighborLoc] && neighbor.owner && neighbor.sell_price) {
+      const { symbol, ratio } = getTokenInfo(neighbor.token_used, prices);
+      const neighborPriceESTRK = convertToESTRK(neighbor.sell_price, symbol, ratio);
+      const neighborTaxRate = getTaxRate(neighbor.level);
+      potentialYield += neighborPriceESTRK * neighborTaxRate;
+    }
+  });
+
+  return potentialYield;
+};
+
+// Format yield with appropriate precision
+const formatYield = (yield_: number): string => {
+  if (yield_ === 0) return '0/h';
+  if (yield_ < 0.01) return '< 0.01/h';
+  return `+${yield_.toFixed(2)}/h`;
+};
+
+// Calculate elapsed time in seconds
+const getElapsedSeconds = (auction: PonziLandAuction): number => {
+  const currentTime = Math.floor(Date.now() / 1000);
+  const startTime = parseInt(auction.start_time);
+  return Math.max(0, currentTime - startTime);
+};
+
 const PonzilandMap = () => {
   const { loading: landsLoading, error: landsError, data: landsData } = useQuery(GET_PONZI_LANDS, {
     pollInterval: 5000,
   });
   
   const { loading: auctionsLoading, error: auctionsError, data: auctionsData } = useQuery(GET_PONZI_LAND_AUCTIONS, {
+    pollInterval: 5000,
+  });
+
+  const { loading: stakesLoading, error: stakesError, data: stakesData } = useQuery(GET_PONZI_LANDS_STAKE, {
     pollInterval: 5000,
   });
 
@@ -664,13 +772,16 @@ const PonzilandMap = () => {
   }, []);
 
   useEffect(() => {
-    if (landsData?.ponziLandLandModels?.edges) {
+    if (landsData?.ponziLandLandModels?.edges && stakesData?.ponziLandLandStakeModels?.edges) {
       const lands = landsData.ponziLandLandModels.edges.map(
         (edge: { node: PonziLand }) => edge.node
       );
-      setGridData(processGridData(lands));
+      const stakes = stakesData.ponziLandLandStakeModels.edges.map(
+        (edge: { node: PonziLandStake }) => edge.node
+      );
+      setGridData(processGridData(lands, stakes));
     }
-  }, [landsData]);
+  }, [landsData, stakesData]);
 
   useEffect(() => {
     if (auctionsData?.ponziLandAuctionModels?.edges) {
@@ -693,8 +804,9 @@ const PonzilandMap = () => {
     setZoom(prev => Math.max(0.5, Math.min(2, prev + delta)));
   };
 
-  if (landsLoading || auctionsLoading) return <div>Loading...</div>;
-  if (landsError || auctionsError) return <div>Error loading lands: {landsError?.message || auctionsError?.message}</div>;
+  if (landsLoading || auctionsLoading || stakesLoading) return <div>Loading...</div>;
+  if (landsError || auctionsError || stakesError) 
+    return <div>Error loading data: {landsError?.message || auctionsError?.message || stakesError?.message}</div>;
 
   return (
     <MapWrapper ref={mapRef}>
@@ -771,11 +883,22 @@ const PonzilandMap = () => {
                 $valueColor={valueColor}
                 $isAuction={!!auction}
                 $opportunityColor={opportunityColor}
+                $isNukable={isNukable(land)}
               >
                 <TileLocation>{displayCoordinates(col, row)}</TileLocation>
                 {land && (
                   auction ? (
-                    <AuctionBadge>FOR AUCTION</AuctionBadge>
+                    <>
+                      <TileLevel>Level {getLevelNumber(land.level)}</TileLevel>
+                      <TileHeader>AUCTION</TileHeader>
+                      <CompactTaxInfo>
+                        <div style={{ color: '#4CAF50' }}>Yield: {formatYield(calculatePotentialYield(Number(land.location), gridData.tiles, prices, activeAuctions))}</div>
+                        <div>{Math.min(
+                          (parseInt(auction.start_price, 16) / 1e18) * parseInt(auction.decay_rate, 10) / (2*getElapsedSeconds(auction)),
+                          parseInt(auction.start_price, 16) / 1e18
+                        ).toFixed(2)} eStrk</div>
+                      </CompactTaxInfo>
+                    </>
                   ) : (
                     <>
                       <TileLevel>Level {getLevelNumber(land.level)}</TileLevel>
@@ -809,6 +932,9 @@ const PonzilandMap = () => {
                           <div>Not for sale</div>
                         )}
                       </CompactTaxInfo>
+                      <StakedInfo $isNukable={isNukable(land)}>
+                        {formatTimeRemaining(hexToDecimal(land.staked_amount || '0x0') / calculateBurnRate(land, gridData.tiles, activeAuctions))}
+                      </StakedInfo>
                     </>
                   )
                 )}

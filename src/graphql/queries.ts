@@ -29,8 +29,27 @@ export const GET_PONZI_LAND_AUCTIONS = gql`
             id
           }
           land_location
-          floor_price
+          start_time
+          start_price
+          decay_rate
           is_finished
+        }
+      }
+      totalCount
+    }
+  }
+`;
+
+export const GET_PONZI_LANDS_STAKE = gql`
+  query GetPonziLandsStake {
+    ponziLandLandStakeModels(first: 4096) {
+      edges {
+        node {
+          entity {
+            id
+          }
+          location
+          amount
         }
       }
       totalCount

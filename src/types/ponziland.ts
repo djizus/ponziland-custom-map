@@ -7,6 +7,7 @@ export interface PonziLand {
   sell_price: string;
   owner: string;
   level: string;
+  staked_amount?: string;
 }
 
 export interface PonziLandResponse {
@@ -23,7 +24,9 @@ export interface PonziLandAuction {
     id: string;
   };
   land_location: number;
-  floor_price: string;
+  start_time: string;
+  start_price: string;
+  decay_rate: string;
   is_finished: boolean;
 }
 
@@ -31,6 +34,23 @@ export interface PonziLandAuctionResponse {
   ponziLandAuctionModels: {
     edges: Array<{
       node: PonziLandAuction;
+    }>;
+    totalCount: number;
+  };
+}
+
+export interface PonziLandStake {
+  entity: {
+    id: string;
+  };
+  location: string;
+  amount: string;
+}
+
+export interface PonziLandStakeResponse {
+  ponziLandLandStakeModels: {
+    edges: Array<{
+      node: PonziLandStake;
     }>;
     totalCount: number;
   };
