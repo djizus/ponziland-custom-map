@@ -1,0 +1,43 @@
+export const config = {
+  runtime: 'edge',
+};
+
+export default async function handler(req: Request) {
+  if (req.method !== 'GET') {
+    return new Response(JSON.stringify({ error: 'Method not allowed' }), {
+      status: 405,
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+      },
+    });
+  }
+
+  try {
+    const response = await fetch('https://api.ponzi.land/price', {
+      headers: {
+        'Accept': 'application/json',
+      },
+    });
+
+    const data = await response.json();
+
+    return new Response(JSON.stringify(data), {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+        'Cache-Control': 's-maxage=1',
+      },
+    });
+  } catch (error) {
+    console.error('Error fetching prices:', error);
+    return new Response(JSON.stringify({ error: 'Failed to fetch prices' }), {
+      status: 500,
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+      },
+    });
+  }
+} 
