@@ -189,7 +189,7 @@ const getLevelNumber = (level: string | undefined): number => {
     case 'zero': return 1;
     case 'first': return 2;
     case 'second': return 3;
-    default: console.log(level); return 1;
+    default: return 1;
   }
 };
 
@@ -473,12 +473,18 @@ interface TaxInfo {
 }
 
 const getTaxRate = (level: string | undefined): number => {
-  if (!level) return 0.25; // Default to level 1 rate
+  const baseRate = 0.05; // 5% baseline per neighbor
+  if (!level) return baseRate;
+  
   switch (level.toLowerCase()) {
-    case 'first': return 0.0375;  // Level 2: 3.75%
-    case 'second': return 0.075;  // Level 3: 7.5%
-    case 'zero': return 0.25;     // Level 1: 25%
-    default: return 0.25;         // Default to level 1 rate
+    case 'first':  // Level 2: 10% reduction from baseline
+      return baseRate * 0.9;  // 4.5%
+    case 'second': // Level 3: 15% reduction from baseline
+      return baseRate * 0.85; // 4.25%
+    case 'zero':   // Level 1: baseline rate
+      return baseRate;        // 5%
+    default:
+      return baseRate;        // Default to baseline rate
   }
 };
 
@@ -889,7 +895,7 @@ const PonzilandMap = () => {
                 {land && (
                   auction ? (
                     <>
-                      <TileLevel>Level {getLevelNumber(land.level)}</TileLevel>
+                      <TileLevel>L{getLevelNumber(land.level)}</TileLevel>
                       <TileHeader>AUCTION</TileHeader>
                       <CompactTaxInfo>
                         <div style={{ color: '#4CAF50' }}>Yield: {formatYield(calculatePotentialYield(Number(land.location), gridData.tiles, prices, activeAuctions))}</div>
@@ -901,7 +907,7 @@ const PonzilandMap = () => {
                     </>
                   ) : (
                     <>
-                      <TileLevel>Level {getLevelNumber(land.level)}</TileLevel>
+                      <TileLevel>L{getLevelNumber(land.level)}</TileLevel>
                       <TileHeader>
                         {taxInfo.profitPerHour !== 0 ? 
                           `${taxInfo.profitPerHour > 0 ? '+' : ''}${taxInfo.profitPerHour.toFixed(1)}/h` :
