@@ -33,6 +33,24 @@ const GridContainer = styled.div<{ zoom: number }>`
   transition: transform 0.2s ease;
 `;
 
+// Add keyframes for the pulse animation
+const pulseAnimation = `
+  @keyframes pulse {
+    0% {
+      box-shadow: 0 0 10px rgba(204, 102, 204, 1), 0 0 20px rgba(204, 102, 204, 0.5);
+      border-color: rgba(204, 102, 204, 1);
+    }
+    50% {
+      box-shadow: 0 0 15px rgba(204, 102, 204, 1), 0 0 30px rgba(204, 102, 204, 0.7);
+      border-color: rgba(255, 182, 255, 1);
+    }
+    100% {
+      box-shadow: 0 0 10px rgba(204, 102, 204, 1), 0 0 20px rgba(204, 102, 204, 0.5);
+      border-color: rgba(204, 102, 204, 1);
+    }
+  }
+`;
+
 const Tile = styled.div<{
   $isMyLand: boolean;
   $level: number;
@@ -40,8 +58,10 @@ const Tile = styled.div<{
   $valueColor: string;
   $isAuction: boolean;
   $opportunityColor: string;
-  $isNukable: boolean;
+  $isNukable: 'nukable' | 'warning' | false;
+  $auctionYield?: number;
 }>`
+  ${pulseAnimation}
   position: relative;
   width: 100px;
   height: 100px;
@@ -59,28 +79,49 @@ const Tile = styled.div<{
       return '3px solid gold';
     }
     if (props.$isAuction) {
-      return '1px solid #cc66cc';
+      const yield_ = props.$auctionYield || 0;
+      if (yield_ >= 50) {
+        return '2px solid rgba(204, 102, 204, 1)'; // Thicker border for very high yield
+      }
+      const alpha = Math.min(0.3 + (yield_ / 30) * 0.7, 1.0); // Scale from 0.3 to 1.0 based on yield, max at 30
+      return `1px solid rgba(204, 102, 204, ${alpha})`;
     }
-    if (props.$isNukable) {
-      return '2px solid #ff0000'; // Red border for nukable lands
+    if (props.$isNukable === 'nukable') {
+      return '2px solid #ff0000';
+    }
+    if (props.$isNukable === 'warning') {
+      return '2px solid #ffa500';
     }
     return `2px solid ${props.$opportunityColor}`;
   }};
   box-shadow: ${props => {
     if (props.$isMyLand) {
-      // Add opportunity glow under the gold border if it exists
       return props.$opportunityColor !== '#333' 
         ? `0 0 15px rgba(255, 215, 0, 0.5), 0 0 10px ${props.$opportunityColor}`
         : '0 0 15px rgba(255, 215, 0, 0.5)';
     }
     if (props.$isAuction) {
-      return '0 0 5px rgba(204, 102, 204, 0.5)';
+      const yield_ = props.$auctionYield || 0;
+      if (yield_ >= 50) {
+        return '0 0 15px rgba(204, 102, 204, 1), 0 0 30px rgba(204, 102, 204, 0.7)'; // Enhanced glow for very high yield
+      }
+      const alpha = Math.min(0.2 + (yield_ / 30) * 0.8, 1.0); // Scale from 0.2 to 1.0 based on yield, max at 30
+      return `0 0 10px rgba(204, 102, 204, ${alpha})`;
     }
-    if (props.$isNukable) {
-      return '0 0 10px rgba(255, 0, 0, 0.3)'; // Red glow for nukable lands
+    if (props.$isNukable === 'nukable') {
+      return '0 0 10px rgba(255, 0, 0, 0.3)';
+    }
+    if (props.$isNukable === 'warning') {
+      return '0 0 10px rgba(255, 165, 0, 0.3)';
     }
     if (props.$opportunityColor !== '#333') {
       return `0 0 10px ${props.$opportunityColor}`;
+    }
+    return 'none';
+  }};
+  animation: ${props => {
+    if (props.$isAuction && (props.$auctionYield || 0) >= 50) {
+      return 'pulse 2s infinite';
     }
     return 'none';
   }};
@@ -443,27 +484,25 @@ const displayCoordinates = (x: number | string, y: number | string): string => {
   return `(${formatCoordinate(x)}, ${formatCoordinate(y)})`;
 };
 
-const getValueColor = (price: string | null, profitPerHour: number, landPriceESTRK: number): string => {
+// Update value color to use grey-blue-green scheme based on yield
+const getValueColor = (price: string | null, profitPerHour: number): string => {
   if (!price) return '#2a2a2a';  // No price = dark gray
   
-  // Calculate ROI
-  const roi = calculateROI(profitPerHour, landPriceESTRK);
+  // Negative yield = dark red shades
+  if (profitPerHour <= -20) return '#4d1515';  // Very negative yield = dark red
+  if (profitPerHour <= -10) return '#4d2015';  // Highly negative yield = dark red-orange
+  if (profitPerHour <= -5) return '#4d2515';   // Moderately negative yield = darker orange
+  if (profitPerHour < 0) return '#4d3015';     // Slightly negative yield = dark orange
   
-  // Negative ROI = progression from dark orange to dark red
-  if (roi <= -100) return '#4d1515';  // Very negative ROI = dark red
-  if (roi <= -50) return '#4d2015';   // Highly negative ROI = dark red-orange
-  if (roi <= -25) return '#4d2515';   // Moderately negative ROI = darker orange
-  if (roi < 0) return '#4d3015';      // Slightly negative ROI = dark orange
-  
-  // Positive ROI = blue/green shades (dark mode friendly)
-  if (roi <= 25) return '#1b3d4d';    // Dark blue-green
-  if (roi <= 50) return '#1b4d4d';    // Darker teal
-  if (roi <= 100) return '#1b4d3d';   // Dark teal
-  if (roi <= 200) return '#1b4d2d';   // Blue-tinted forest green
-  if (roi <= 400) return '#1b4d1b';   // Dark forest green
-  if (roi <= 800) return '#2d4d1b';   // Rich forest green
-  if (roi <= 1600) return '#1b3d5d';  // Deep ocean blue
-  return '#1b2d6d';                   // Rich royal blue - highest ROI
+  // Positive yield = grey -> blue -> green progression (dark mode friendly)
+  if (profitPerHour <= 5) return '#2d2d35';    // Very low yield = dark grey with slight blue tint
+  if (profitPerHour <= 10) return '#2d2d40';   // Low yield = grey-blue
+  if (profitPerHour <= 15) return '#1e2d4d';   // Low-medium yield = darker blue
+  if (profitPerHour <= 20) return '#1b2d5d';   // Medium yield = medium blue
+  if (profitPerHour <= 30) return '#1b3d6d';   // Medium-high yield = brighter blue
+  if (profitPerHour <= 40) return '#1b4d4d';   // High yield = blue-green
+  if (profitPerHour <= 50) return '#1b4d3d';   // Very high yield = forest green
+  return '#1b4d2d';                            // Highest yield = rich green
 };
 
 interface TaxInfo {
@@ -569,18 +608,19 @@ const calculateROI = (profitPerHour: number, landPriceESTRK: number): number => 
   return (profitPerHour / landPriceESTRK) * 100;
 };
 
-// Update opportunity color to require both high ROI and significant profit
+// Update opportunity color to highlight high ROI only for lands with significant yield
 const getOpportunityColor = (profitPerHour: number, landPriceESTRK: number): string => {
-  if (profitPerHour <= 10) return '#333';  // Require minimum 10 eSTRK/hour profit
+  // Only consider ROI for lands earning more than 20 tokens per hour
+  if (profitPerHour <= 20) return '#333';
   
   const roi = calculateROI(profitPerHour, landPriceESTRK);
   if (roi <= 100) return '#333';  // Require minimum 100% hourly ROI
   
-  // Scale intensity based on how much the profit exceeds 10 eSTRK/hour
-  // Max brightness at 50 eSTRK/hour
-  const intensity = Math.min((profitPerHour - 10) / 40, 1);
+  // Scale intensity based on ROI for high-yield lands
+  // Max brightness at 400% ROI
+  const intensity = Math.min((roi - 100) / 300, 1);
   
-  return `rgba(0, 255, 255, ${intensity})`; // Cyan color for profit borders
+  return `rgba(0, 255, 255, ${intensity})`; // Cyan color for high ROI + high yield borders
 };
 
 const TaxInfo = styled.div`
@@ -648,15 +688,33 @@ const calculateBurnRate = (land: PonziLand | null, lands: (PonziLand | null)[], 
   return burnRate;
 };
 
-const StakedInfo = styled.div<{ $isNukable: boolean }>`
+const StakedInfo = styled.div<{ $isNukable: 'nukable' | 'warning' | false }>`
   position: absolute;
   bottom: 2px;
   left: 2px;
-  background: ${props => props.$isNukable ? 'rgba(255, 0, 0, 0.5)' : 'rgba(0, 0, 0, 0.5)'};
+  background: ${props => {
+    switch (props.$isNukable) {
+      case 'nukable':
+        return 'rgba(255, 0, 0, 0.5)';
+      case 'warning':
+        return 'rgba(255, 165, 0, 0.5)';
+      default:
+        return 'rgba(0, 0, 0, 0.5)';
+    }
+  }};
   padding: 2px 4px;
   border-radius: 3px;
   font-size: 9px;
-  color: ${props => props.$isNukable ? '#ff9999' : '#fff'};
+  color: ${props => {
+    switch (props.$isNukable) {
+      case 'nukable':
+        return '#ff9999';
+      case 'warning':
+        return '#ffd700';
+      default:
+        return '#fff';
+    }
+  }};
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -669,11 +727,18 @@ const hexToDecimal = (hex: string): number => {
   return parseInt(hex, 16) / 1e18; // Assuming 18 decimals
 };
 
-// Function to check if a land is nukable (no staked tokens)
-const isNukable = (land: PonziLand | null): boolean => {
+// Function to check if a land is nukable (no staked tokens) or close to nukable
+const isNukable = (land: PonziLand | null, burnRate: number): 'nukable' | 'warning' | false => {
   if (!land) return false;
   const stakedAmount = hexToDecimal(land.staked_amount || '0x0');
-  return stakedAmount <= 0;
+  if (stakedAmount <= 0) return 'nukable';
+  
+  // Calculate time remaining in hours
+  const timeRemainingHours = stakedAmount / burnRate;
+  // Convert to minutes and check if less than or equal to 5 minutes
+  const timeRemainingMinutes = timeRemainingHours * 60;
+  
+  return timeRemainingMinutes <= 5 ? 'warning' : false;
 };
 
 // Format time remaining showing only hours and minutes
@@ -687,11 +752,9 @@ const formatTimeRemaining = (hours: number): string => {
   const hoursLeft = Math.floor(totalMinutes / 60);
   const minutesLeft = totalMinutes % 60;
   
-  if (hoursLeft === 0) {
-    return `${minutesLeft}m`;
-  }
-  
-  return `${hoursLeft}h ${minutesLeft}m`;
+  // Add warning indicator for 5 minutes or less
+  const timeString = hoursLeft === 0 ? `${minutesLeft}m` : `${hoursLeft}h ${minutesLeft}m`;
+  return totalMinutes <= 5 ? `⚠️ ${timeString}` : timeString;
 };
 
 // Calculate potential yield for an auction tile
@@ -954,8 +1017,7 @@ const PonzilandMap = () => {
             const landPriceESTRK = land ? convertToESTRK(land.sell_price, symbol, ratio) : 0;
             const valueColor = land ? getValueColor(
               land.sell_price, 
-              taxInfo.profitPerHour,
-              landPriceESTRK
+              taxInfo.profitPerHour
             ) : '#1a1a1a';
             
             const opportunityColor = getOpportunityColor(taxInfo.profitPerHour, landPriceESTRK);
@@ -971,7 +1033,8 @@ const PonzilandMap = () => {
                 $valueColor={valueColor}
                 $isAuction={!!auction}
                 $opportunityColor={opportunityColor}
-                $isNukable={isNukable(land)}
+                $isNukable={land ? isNukable(land, calculateBurnRate(land, gridData.tiles, activeAuctions)) : false}
+                $auctionYield={auction ? calculatePotentialYield(Number(land?.location), gridData.tiles, prices, activeAuctions) : undefined}
               >
                 <TileLocation>{displayCoordinates(col, row)}</TileLocation>
                 {land && (
@@ -1029,7 +1092,7 @@ const PonzilandMap = () => {
                           <div>Not for sale</div>
                         )}
                       </CompactTaxInfo>
-                      <StakedInfo $isNukable={isNukable(land)}>
+                      <StakedInfo $isNukable={land ? isNukable(land, calculateBurnRate(land, gridData.tiles, activeAuctions)) : false}>
                         {formatTimeRemaining(hexToDecimal(land.staked_amount || '0x0') / calculateBurnRate(land, gridData.tiles, activeAuctions))}
                       </StakedInfo>
                     </>
