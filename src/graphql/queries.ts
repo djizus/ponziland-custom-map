@@ -29,6 +29,7 @@ export const GET_PONZI_LAND_AUCTIONS = gql`
             id
           }
           land_location
+          floor_price
           start_time
           start_price
           decay_rate

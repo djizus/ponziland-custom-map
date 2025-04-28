@@ -26,8 +26,9 @@ export interface PonziLandAuction {
   land_location: number;
   start_time: string;
   start_price: string;
-  decay_rate: string;
+  decay_rate: number;
   is_finished: boolean;
+  floor_price?: string;
 }
 
 export interface PonziLandAuctionResponse {

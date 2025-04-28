@@ -564,10 +564,9 @@ const calculateTaxInfo = (
 // Update ROI calculation to include purchase price
 const calculateROI = (profitPerHour: number, landPriceESTRK: number): number => {
   if (landPriceESTRK <= 0) return 0;
-  // ROI = (profit per hour / (land price + purchase price)) × 100
-  // We need to buy the land first, so we include the purchase price in the investment
-  const totalInvestment = landPriceESTRK * 2; // Purchase price + listing price
-  return (profitPerHour / totalInvestment) * 100;
+  // ROI = (profit per hour / purchase price) × 100
+  // Only the purchase price is considered as the investment
+  return (profitPerHour / landPriceESTRK) * 100;
 };
 
 // Update opportunity color to require both high ROI and significant profit
@@ -732,6 +731,89 @@ const getElapsedSeconds = (auction: PonziLandAuction): number => {
   const startTime = parseInt(auction.start_time);
   return Math.max(0, currentTime - startTime);
 };
+
+// --- Auction price decay logic from PonziLand contract ---
+const DECIMALS_FACTOR = 1_000_000_000_000_000_000n;
+const AUCTION_DURATION = 7 * 24 * 60 * 60; // 1 week in seconds
+const LINEAR_DECAY_TIME = 10 * 60 * 20; // 10 minutes IRL (scaled by TIME_SPEED)
+const DROP_RATE = 90n; // 90% drop over linear phase
+const RATE_DENOMINATOR = 100n; // For percentage calculations
+const SCALING_FACTOR = 50n;
+const TIME_SPEED = 20n;
+
+function getCurrentAuctionPriceDecayRate(
+  startTime: bigint,
+  startPrice: bigint,
+  floorPrice: bigint,
+  decayRate: bigint,
+  currentTime: bigint
+): bigint {
+  // Calculate time passed, scaled by TIME_SPEED
+  const timePassed = currentTime > startTime
+    ? (currentTime - startTime) * TIME_SPEED
+    : 0n;
+
+  // If auction duration exceeded, price is 0
+  if (timePassed >= BigInt(AUCTION_DURATION)) {
+    return 0n;
+  }
+
+  let currentPrice = startPrice;
+
+  // --- Linear phase ---
+  if (timePassed <= BigInt(LINEAR_DECAY_TIME)) {
+    const timeFraction = timePassed * DECIMALS_FACTOR / BigInt(LINEAR_DECAY_TIME);
+    const linearFactor = DECIMALS_FACTOR - (DROP_RATE * timeFraction / RATE_DENOMINATOR);
+    currentPrice = startPrice * linearFactor / DECIMALS_FACTOR;
+  } else {
+    // --- Quadratic phase ---
+    const remainingRate = RATE_DENOMINATOR - DROP_RATE;
+    const priceAfterLinear = startPrice * remainingRate / RATE_DENOMINATOR;
+
+    const progressTime = timePassed * DECIMALS_FACTOR / BigInt(AUCTION_DURATION);
+
+    // k is the decay rate (adjusted by DECIMALS_FACTOR for scaling)
+    const k = decayRate * DECIMALS_FACTOR / SCALING_FACTOR;
+
+    // Calculate the denominator (1 + k * t) using scaled values for precision
+    const denominator = DECIMALS_FACTOR + (k * progressTime / DECIMALS_FACTOR);
+
+    // Calculate the decay factor using the formula (1 / (1 + k * t))^2
+    let decayFactor: bigint;
+    if (denominator !== 0n) {
+      const temp = (DECIMALS_FACTOR * DECIMALS_FACTOR) / denominator;
+      decayFactor = (temp * temp) / DECIMALS_FACTOR;
+    } else {
+      decayFactor = 0n;
+    }
+
+    currentPrice = priceAfterLinear * decayFactor / DECIMALS_FACTOR;
+  }
+
+  return currentPrice > floorPrice ? currentPrice : floorPrice;
+}
+
+function calculateAuctionPrice(auction: PonziLandAuction): number {
+  const startPrice = BigInt(auction.start_price);
+  const floorPrice = auction.floor_price ? BigInt(auction.floor_price) : 0n;
+  const decayRate = BigInt(auction.decay_rate);
+  const startTime = BigInt(parseInt(auction.start_time, 16));
+  const currentTime = BigInt(Math.floor(Date.now() / 1000));
+
+  const price = getCurrentAuctionPriceDecayRate(startTime, startPrice, floorPrice, decayRate, currentTime);
+  return Number(price) / Number(DECIMALS_FACTOR);
+}
+
+const AuctionElapsedInfo = styled.div`
+  position: absolute;
+  bottom: 2px;
+  left: 2px;
+  background: rgba(0, 0, 0, 0.5);
+  padding: 2px 4px;
+  border-radius: 3px;
+  font-size: 9px;
+  color: #fff;
+`;
 
 const PonzilandMap = () => {
   const { loading: landsLoading, error: landsError, data: landsData } = useQuery(GET_PONZI_LANDS, {
@@ -899,11 +981,20 @@ const PonzilandMap = () => {
                       <TileHeader>AUCTION</TileHeader>
                       <CompactTaxInfo>
                         <div style={{ color: '#4CAF50' }}>Yield: {formatYield(calculatePotentialYield(Number(land.location), gridData.tiles, prices, activeAuctions))}</div>
-                        <div>{Math.min(
-                          (parseInt(auction.start_price, 16) / 1e18) * parseInt(auction.decay_rate, 10) / (2*getElapsedSeconds(auction)),
-                          parseInt(auction.start_price, 16) / 1e18
-                        ).toFixed(2)} eStrk</div>
+                        <div>{calculateAuctionPrice(auction).toFixed(2)} eStrk</div>
                       </CompactTaxInfo>
+                      <AuctionElapsedInfo>
+                        {(() => {
+                          const elapsed = getElapsedSeconds(auction);
+                          const hours = Math.floor(elapsed / 3600);
+                          const minutes = Math.floor((elapsed % 3600) / 60);
+                          if (hours > 0) {
+                            return `${hours}h ${minutes}m`;
+                          } else {
+                            return `${minutes}m`;
+                          }
+                        })()}
+                      </AuctionElapsedInfo>
                     </>
                   ) : (
                     <>
