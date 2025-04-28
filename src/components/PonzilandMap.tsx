@@ -72,6 +72,7 @@ const Tile = styled.div<{
   background-color: ${props => {
     if (props.$isEmpty) return '#1a1a1a';
     if (props.$isAuction) return '#1f1b2e';
+    if (props.$isNukable === 'warning') return '#4d3015'; // Orange background for warning state
     return props.$valueColor;
   }};
   border: ${props => {
@@ -81,16 +82,17 @@ const Tile = styled.div<{
     if (props.$isAuction) {
       const yield_ = props.$auctionYield || 0;
       if (yield_ >= 50) {
-        return '2px solid rgba(204, 102, 204, 1)'; // Thicker border for very high yield
+        return '2px solid rgba(204, 102, 204, 1)';
       }
-      const alpha = Math.min(0.3 + (yield_ / 30) * 0.7, 1.0); // Scale from 0.3 to 1.0 based on yield, max at 30
+      const alpha = Math.min(0.3 + (yield_ / 30) * 0.7, 1.0);
       return `1px solid rgba(204, 102, 204, ${alpha})`;
     }
     if (props.$isNukable === 'nukable') {
       return '2px solid #ff0000';
     }
+    // Remove border for warning state
     if (props.$isNukable === 'warning') {
-      return '2px solid #ffa500';
+      return 'none';
     }
     return `2px solid ${props.$opportunityColor}`;
   }};
@@ -103,16 +105,17 @@ const Tile = styled.div<{
     if (props.$isAuction) {
       const yield_ = props.$auctionYield || 0;
       if (yield_ >= 50) {
-        return '0 0 15px rgba(204, 102, 204, 1), 0 0 30px rgba(204, 102, 204, 0.7)'; // Enhanced glow for very high yield
+        return '0 0 15px rgba(204, 102, 204, 1), 0 0 30px rgba(204, 102, 204, 0.7)';
       }
-      const alpha = Math.min(0.2 + (yield_ / 30) * 0.8, 1.0); // Scale from 0.2 to 1.0 based on yield, max at 30
+      const alpha = Math.min(0.2 + (yield_ / 30) * 0.8, 1.0);
       return `0 0 10px rgba(204, 102, 204, ${alpha})`;
     }
     if (props.$isNukable === 'nukable') {
       return '0 0 10px rgba(255, 0, 0, 0.3)';
     }
+    // Remove glow for warning state
     if (props.$isNukable === 'warning') {
-      return '0 0 10px rgba(255, 165, 0, 0.3)';
+      return 'none';
     }
     if (props.$opportunityColor !== '#333') {
       return `0 0 10px ${props.$opportunityColor}`;
@@ -484,25 +487,34 @@ const displayCoordinates = (x: number | string, y: number | string): string => {
   return `(${formatCoordinate(x)}, ${formatCoordinate(y)})`;
 };
 
-// Update value color to use grey-blue-green scheme based on yield
+// Update value color to use pure green/red gradients with more grey near zero
 const getValueColor = (price: string | null, profitPerHour: number): string => {
   if (!price) return '#2a2a2a';  // No price = dark gray
   
-  // Negative yield = dark red shades
-  if (profitPerHour <= -20) return '#4d1515';  // Very negative yield = dark red
-  if (profitPerHour <= -10) return '#4d2015';  // Highly negative yield = dark red-orange
-  if (profitPerHour <= -5) return '#4d2515';   // Moderately negative yield = darker orange
-  if (profitPerHour < 0) return '#4d3015';     // Slightly negative yield = dark orange
+  // Negative yield = grey to red progression
+  if (profitPerHour <= -20) return '#4d1515';  // Very negative yield = darkest red
+  if (profitPerHour <= -15) return '#4d1818';
+  if (profitPerHour <= -10) return '#4d1b1b';
+  if (profitPerHour <= -7) return '#452020';   // More grey-red
+  if (profitPerHour <= -5) return '#403030';   // Very grey-red
+  if (profitPerHour <= -3) return '#383232';   // Almost grey with red tint
+  if (profitPerHour < 0) return '#333232';     // Barely red grey
   
-  // Positive yield = grey -> blue -> green progression (dark mode friendly)
-  if (profitPerHour <= 5) return '#2d2d35';    // Very low yield = dark grey with slight blue tint
-  if (profitPerHour <= 10) return '#2d2d40';   // Low yield = grey-blue
-  if (profitPerHour <= 15) return '#1e2d4d';   // Low-medium yield = darker blue
-  if (profitPerHour <= 20) return '#1b2d5d';   // Medium yield = medium blue
-  if (profitPerHour <= 30) return '#1b3d6d';   // Medium-high yield = brighter blue
-  if (profitPerHour <= 40) return '#1b4d4d';   // High yield = blue-green
-  if (profitPerHour <= 50) return '#1b4d3d';   // Very high yield = forest green
-  return '#1b4d2d';                            // Highest yield = rich green
+  // Zero and near-zero yields = grey progression
+  if (profitPerHour === 0) return '#2d2d2d';   // Pure grey
+  if (profitPerHour <= 1) return '#2d2e2d';    // Barely green grey
+  if (profitPerHour <= 3) return '#2d302d';    // Almost grey with green tint
+  if (profitPerHour <= 5) return '#2d332d';    // Very grey-green
+  if (profitPerHour <= 7) return '#2d362d';    // More grey-green
+  
+  // Higher positive yield = stronger green progression
+  if (profitPerHour <= 10) return '#1a331a';
+  if (profitPerHour <= 15) return '#1a391a';
+  if (profitPerHour <= 20) return '#1a3f1a';
+  if (profitPerHour <= 30) return '#1a451a';
+  if (profitPerHour <= 40) return '#1a4b1a';
+  if (profitPerHour <= 50) return '#1a511a';
+  return '#1a571a';                            // Highest yield = brightest green
 };
 
 interface TaxInfo {
