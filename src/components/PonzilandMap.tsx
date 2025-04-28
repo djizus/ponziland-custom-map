@@ -747,10 +747,10 @@ const isNukable = (land: PonziLand | null, burnRate: number): 'nukable' | 'warni
   
   // Calculate time remaining in hours
   const timeRemainingHours = stakedAmount / burnRate;
-  // Convert to minutes and check if less than or equal to 5 minutes
+  // Convert to minutes and check if less than or equal to 10 minutes
   const timeRemainingMinutes = timeRemainingHours * 60;
   
-  return timeRemainingMinutes <= 5 ? 'warning' : false;
+  return timeRemainingMinutes <= 10 ? 'warning' : false;
 };
 
 // Format time remaining showing only hours and minutes
@@ -764,9 +764,9 @@ const formatTimeRemaining = (hours: number): string => {
   const hoursLeft = Math.floor(totalMinutes / 60);
   const minutesLeft = totalMinutes % 60;
   
-  // Add warning indicator for 5 minutes or less
+  // Add warning indicator for 10 minutes or less
   const timeString = hoursLeft === 0 ? `${minutesLeft}m` : `${hoursLeft}h ${minutesLeft}m`;
-  return totalMinutes <= 5 ? `⚠️ ${timeString}` : timeString;
+  return totalMinutes <= 10 ? `⚠️ ${timeString}` : timeString;
 };
 
 // Calculate potential yield for an auction tile
