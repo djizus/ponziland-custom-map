@@ -4,7 +4,7 @@ export const config = {
   runtime: 'edge',
 };
 
-export const POST = async ({ request }: { request: Request }) => {
+export const POST = async (request: Request) => {
   try {
     const body = await request.json();
     const clientAddresses: string[] | undefined = body.addresses;
