@@ -6,6 +6,10 @@ import { useEffect, useState, useRef } from 'react';
 
 const MY_ADDRESS = '0x4364d8e9f994453f5d0c8dc838293226d8ae0aec78030e5ee5fb91614b00eb5';
 
+// --- Tax System Constants ---
+const TAX_RATE_RAW = 2; // Represents 2%
+const TIME_SPEED_FACTOR = 5;
+
 const MapWrapper = styled.div`
   position: fixed;
   top: 0;
@@ -433,7 +437,10 @@ const MinimizeButton = styled.span`
   }
 `;
 
-const formatRatio = (ratio: number): string => {
+const formatRatio = (ratio: number | null): string => {
+  if (ratio === null || ratio === undefined) {
+    return 'N/A';
+  }
   if (ratio >= 1) {
     return ratio.toFixed(2);
   }
@@ -443,11 +450,26 @@ const formatRatio = (ratio: number): string => {
 };
 
 const normalizeAddress = (address: string): string => {
-  // Remove '0x0' prefix and replace with '0x'
-  if (address.startsWith('0x0')) {
-    return '0x' + address.slice(3);
+  if (!address || typeof address !== 'string') {
+    console.warn('normalizeAddress received invalid input:', address);
+    return ''; // Return an empty string or a specific "invalid" marker
   }
-  return address;
+  let addr = address.toLowerCase();
+  if (!addr.startsWith('0x')) {
+    // This case should ideally not happen for valid StarkNet addresses.
+    // Depending on requirements, one might throw an error or return original.
+    console.warn('normalizeAddress received address without 0x prefix:', address);
+    return addr; // Or return original 'address' if case should be preserved
+  }
+  // Remove '0x' prefix, convert to BigInt, then back to hex string.
+  // This standardizes the address by removing unnecessary leading zeros after '0x'.
+  try {
+    const bigintAddress = BigInt(addr);
+    return '0x' + bigintAddress.toString(16);
+  } catch (e) {
+    console.error(`Error normalizing address ${address}:`, e);
+    return addr; // Fallback to the lowercased '0x' prefixed address if BigInt conversion fails
+  }
 };
 
 const getTokenInfo = (address: string, prices: TokenPrice[]): { symbol: string; ratio: number | null } => {
@@ -470,7 +492,7 @@ const formatOriginalPrice = (price: string | null): string => {
 };
 
 const calculateESTRKPrice = (originalPrice: string | null, ratio: number | null): string => {
-  if (!originalPrice || ratio === null) return '';
+  if (!originalPrice || ratio === null || ratio === undefined) return '';
   const price = Number(formatOriginalPrice(originalPrice));
   return (price / ratio).toFixed(2);
 };
@@ -523,25 +545,40 @@ interface TaxInfo {
   profitPerHour: number;
 }
 
-const getTaxRate = (level: string | undefined): number => {
-  const baseRate = 0.05; // 5% baseline per neighbor
-  if (!level) return baseRate;
-  
-  switch (level.toLowerCase()) {
-    case 'first':  // Level 2: 10% reduction from baseline
-      return baseRate * 0.9;  // 4.5%
-    case 'second': // Level 3: 15% reduction from baseline
-      return baseRate * 0.85; // 4.25%
-    case 'zero':   // Level 1: baseline rate
-      return baseRate;        // 5%
-    default:
-      return baseRate;        // Default to baseline rate
+// Modified getTaxRate
+const getTaxRate = (level: string | undefined, locationNum: number): number => {
+  const numCardinalNeighbors = getNeighborLocations(locationNum).length;
+
+  if (numCardinalNeighbors === 0) {
+    return 0; // No tax if no cardinal neighbors to pay to/receive from based on this logic
   }
+
+  // Base rate factor per neighbor, incorporating TAX_RATE_RAW and TIME_SPEED_FACTOR
+  // Formula: (TAX_RATE_RAW / 100.0) * TIME_SPEED_FACTOR / numCardinalNeighbors
+  const baseRate = (TAX_RATE_RAW / 100.0) * TIME_SPEED_FACTOR / numCardinalNeighbors;
+  
+  let discountedRate = baseRate;
+  if (level) {
+    switch (level.toLowerCase()) {
+      case 'first':  // Level 'First': 10% reduction from baseRate
+        discountedRate = baseRate * 0.9;
+        break;
+      case 'second': // Level 'Second': 15% reduction from baseRate
+        discountedRate = baseRate * 0.85;
+        break;
+      case 'zero':   // Level 'Zero': 0% reduction
+      default:
+        // discountedRate remains baseRate
+        break;
+    }
+  }
+  return discountedRate;
 };
 
 const convertToESTRK = (price: string | null, symbol: string, ratio: number | null): number => {
-  if (!price || symbol === 'eSTRK') return Number(formatOriginalPrice(price));
-  return ratio ? Number(calculateESTRKPrice(price, ratio)) : 0;
+  if (!price || symbol === 'nftSTRK') return Number(formatOriginalPrice(price));
+  if (ratio === null || ratio === undefined) return 0;
+  return Number(calculateESTRKPrice(price, ratio));
 };
 
 const getNeighborLocations = (location: number): number[] => {
@@ -577,30 +614,25 @@ const calculateTaxInfo = (
   let taxPaid = 0;
   let taxReceived = 0;
 
-  // Calculate current land's sale price in eSTRK
   const { symbol: mySymbol, ratio: myRatio } = getTokenInfo(currentLand.token_used, prices);
   const myPriceESTRK = convertToESTRK(currentLand.sell_price, mySymbol, myRatio);
 
-  // Calculate tax paid to neighbors based on our level's tax rate
   if (currentLand.sell_price) {
-    const myTaxRate = getTaxRate(currentLand.level);
+    const myTaxRate = getTaxRate(currentLand.level, Number(currentLand.location));
     neighbors.forEach(neighborLoc => {
       const neighbor = lands[neighborLoc];
-      // Only pay tax if neighbor exists, is not on auction, and has an owner
       if (neighbor && !activeAuctions[neighborLoc] && neighbor.owner) {
         taxPaid += myPriceESTRK * myTaxRate;
       }
     });
   }
 
-  // Calculate tax received from neighbors based on their level's tax rate
   neighbors.forEach(neighborLoc => {
     const neighbor = lands[neighborLoc];
-    // Only receive tax if neighbor exists, is not on auction, has an owner and is for sale
     if (neighbor && !activeAuctions[neighborLoc] && neighbor.owner && neighbor.sell_price) {
       const { symbol: neighborSymbol, ratio: neighborRatio } = getTokenInfo(neighbor.token_used, prices);
       const neighborPriceESTRK = convertToESTRK(neighbor.sell_price, neighborSymbol, neighborRatio);
-      const neighborTaxRate = getTaxRate(neighbor.level);
+      const neighborTaxRate = getTaxRate(neighbor.level, Number(neighbor.location));
       taxReceived += neighborPriceESTRK * neighborTaxRate;
     }
   });
@@ -622,15 +654,14 @@ const calculateROI = (profitPerHour: number, landPriceESTRK: number): number => 
 
 // Update opportunity color to highlight high ROI only for lands with significant yield
 const getOpportunityColor = (profitPerHour: number, landPriceESTRK: number): string => {
-  // Only consider ROI for lands earning more than 20 tokens per hour
-  if (profitPerHour <= 20) return '#333';
-  
+  // Only consider ROI for lands earning more than 10 tokens per hour
+  if (profitPerHour <= 4) return '#333';
   const roi = calculateROI(profitPerHour, landPriceESTRK);
-  if (roi <= 100) return '#333';  // Require minimum 100% hourly ROI
+  if (roi <= 10) return '#333';  // MODIFIED: Require minimum 50% hourly ROI
   
   // Scale intensity based on ROI for high-yield lands
-  // Max brightness at 400% ROI
-  const intensity = Math.min((roi - 100) / 300, 1);
+  // Max brightness at 100% ROI, starting from 0%
+  const intensity = Math.min((roi) / 100, 1); // MODIFIED: (roi - 50) / (400 - 50)
   
   return `rgba(0, 255, 255, ${intensity})`; // Cyan color for high ROI + high yield borders
 };
@@ -685,7 +716,7 @@ const calculateBurnRate = (land: PonziLand | null, lands: (PonziLand | null)[], 
   if (!land || !land.sell_price) return 0;
   
   const neighbors = getNeighborLocations(Number(land.location));
-  const taxRate = getTaxRate(land.level);
+  const taxRate = getTaxRate(land.level, Number(land.location));
   let burnRate = 0;
   
   // Calculate burn rate using the same logic as tax calculation
@@ -781,11 +812,10 @@ const calculatePotentialYield = (
 
   neighbors.forEach(neighborLoc => {
     const neighbor = lands[neighborLoc];
-    // Only count yield from neighbors that exist, are not on auction, have an owner and are for sale
     if (neighbor && !activeAuctions[neighborLoc] && neighbor.owner && neighbor.sell_price) {
       const { symbol, ratio } = getTokenInfo(neighbor.token_used, prices);
       const neighborPriceESTRK = convertToESTRK(neighbor.sell_price, symbol, ratio);
-      const neighborTaxRate = getTaxRate(neighbor.level);
+      const neighborTaxRate = getTaxRate(neighbor.level, Number(neighbor.location));
       potentialYield += neighborPriceESTRK * neighborTaxRate;
     }
   });
@@ -809,12 +839,12 @@ const getElapsedSeconds = (auction: PonziLandAuction): number => {
 
 // --- Auction price decay logic from PonziLand contract ---
 const DECIMALS_FACTOR = 1_000_000_000_000_000_000n;
-const AUCTION_DURATION = 7 * 24 * 60 * 60; // 1 week in seconds
-const LINEAR_DECAY_TIME = 10 * 60 * 20; // 10 minutes IRL (scaled by TIME_SPEED)
-const DROP_RATE = 90n; // 90% drop over linear phase
+const AUCTION_DURATION = 7 * 24 * 60 * 60; // 1 week in seconds (604,800)
+const LINEAR_DECAY_TIME = 10 * 60 * 20; // 12,000 game seconds. With TIME_SPEED=5, this phase is 40 real-world minutes.
+const DROP_RATE = 90n; // 90% drop target over linear phase
 const RATE_DENOMINATOR = 100n; // For percentage calculations
 const SCALING_FACTOR = 50n;
-const TIME_SPEED = 20n;
+const TIME_SPEED = 5n; // Corrected to match contract
 
 function getCurrentAuctionPriceDecayRate(
   startTime: bigint,
@@ -1056,7 +1086,7 @@ const PonzilandMap = () => {
                       <TileHeader>AUCTION</TileHeader>
                       <CompactTaxInfo>
                         <div style={{ color: '#4CAF50' }}>Yield: {formatYield(calculatePotentialYield(Number(land.location), gridData.tiles, prices, activeAuctions))}</div>
-                        <div>{calculateAuctionPrice(auction).toFixed(2)} eStrk</div>
+                        <div>{calculateAuctionPrice(auction).toFixed(2)} nftSTRK</div>
                       </CompactTaxInfo>
                       <AuctionElapsedInfo>
                         {(() => {
@@ -1084,8 +1114,11 @@ const PonzilandMap = () => {
                         {land.sell_price ? (
                           <>
                             <div>{formatOriginalPrice(land.sell_price)} {symbol}</div>
-                            {symbol !== 'eSTRK' && (
-                              <div>{calculateESTRKPrice(land.sell_price, ratio)} eSTRK</div>
+                            {symbol !== 'nftSTRK' && ratio !== null && (
+                              <div>{calculateESTRKPrice(land.sell_price, ratio)} nftSTRK</div>
+                            )}
+                            {symbol !== 'nftSTRK' && ratio === null && (
+                              <div>Price unavailable</div>
                             )}
                             {(taxInfo.taxPaid > 0 || taxInfo.taxReceived > 0) && (
                               <>
@@ -1126,13 +1159,13 @@ const PonzilandMap = () => {
           </MinimizeButton>
         </PriceHeader>
         {prices
-          .filter(token => token.symbol !== 'eSTRK')
+          .filter(token => token.symbol !== 'nftSTRK')
           .sort((a, b) => (b.ratio || 0) - (a.ratio || 0))
           .map(token => (
             <PriceRow key={token.address}>
               <TokenSymbol>{token.symbol}</TokenSymbol>
               <TokenValue>
-                {formatRatio(token.ratio || 0)} eSTRK
+                {token.ratio !== null ? formatRatio(token.ratio) : 'N/A'} nftSTRK
               </TokenValue>
             </PriceRow>
           ))}

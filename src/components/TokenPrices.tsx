@@ -58,19 +58,35 @@ const TokenPrice = styled.span`
 `;
 
 const TokenPrices = ({ prices }: TokenPricesProps) => {
-  // Filter out tokens without ratios and sort by symbol
-  const validPrices = prices
-    .filter(price => price.ratio !== null)
-    .sort((a, b) => a.symbol.localeCompare(b.symbol));
+  // Sort by symbol, showing tokens with valid ratios first
+  const sortedPrices = prices
+    .sort((a, b) => {
+      // Show tokens with valid ratios first
+      if (a.ratio !== null && b.ratio === null) return -1;
+      if (a.ratio === null && b.ratio !== null) return 1;
+      return a.symbol.localeCompare(b.symbol);
+    });
+
+  const formatRatio = (ratio: number | null): string => {
+    if (ratio === null || ratio === undefined) {
+      return 'N/A';
+    }
+    if (ratio >= 1) {
+      return ratio.toFixed(4);
+    }
+    // For small numbers, calculate appropriate decimal places
+    const decimalPlaces = Math.max(4, -Math.floor(Math.log10(ratio)) + 2);
+    return ratio.toFixed(decimalPlaces);
+  };
 
   return (
     <PriceContainer>
-      <PriceTitle>Token Prices (in eSTRK)</PriceTitle>
+      <PriceTitle>Token Prices (in nftSTRK)</PriceTitle>
       <PriceList>
-        {validPrices.map((price) => (
+        {sortedPrices.map((price) => (
           <PriceItem key={price.address}>
             <TokenSymbol>{price.symbol}</TokenSymbol>
-            <TokenPrice>{price.ratio ? price.ratio.toFixed(4) : 'N/A'}</TokenPrice>
+            <TokenPrice>{formatRatio(price.ratio)}</TokenPrice>
           </PriceItem>
         ))}
       </PriceList>
