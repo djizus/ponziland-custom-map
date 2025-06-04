@@ -1,10 +1,7 @@
-import { useQuery } from '@apollo/client';
-import { GET_PONZI_LANDS, GET_PONZI_LAND_AUCTIONS, GET_PONZI_LANDS_STAKE } from '../graphql/queries';
-import { PonziLand, PonziLandAuction, PonziLandStake } from '../types/ponziland';
+import { PonziLand, PonziLandAuction, PonziLandStake, TaxInfo, SelectedTileDetails, TokenPrice } from '../types/ponziland';
 import styled from 'styled-components';
 import { useEffect, useState, useRef } from 'react';
 
-const MY_ADDRESS = '0x4364d8e9f994453f5d0c8dc838293226d8ae0aec78030e5ee5fb91614b00eb5';
 
 // --- Tax System Constants ---
 const TAX_RATE_RAW = 2; // Represents 2%
@@ -189,13 +186,11 @@ const processGridData = (lands: PonziLand[], stakes: PonziLandStake[]) => {
   let minCol = GRID_SIZE;
   let maxCol = 0;
 
-  // Create a map of stakes by location
   const stakesMap = stakes.reduce((acc, stake) => {
     acc[Number(stake.location)] = stake.amount;
     return acc;
   }, {} as Record<number, string>);
 
-  // First pass: find the boundaries of the land area
   lands.forEach(land => {
     const location = Number(land.location);
     const [x, y] = getCoordinates(location);
@@ -205,7 +200,6 @@ const processGridData = (lands: PonziLand[], stakes: PonziLandStake[]) => {
     maxCol = Math.max(maxCol, Number(x));
   });
 
-  // Second pass: fill the grid with lands and their stake amounts
   lands.forEach(land => {
     const location = Number(land.location);
     grid[location] = {
@@ -214,7 +208,6 @@ const processGridData = (lands: PonziLand[], stakes: PonziLandStake[]) => {
     };
   });
 
-  // Create arrays of all rows and columns within the boundaries
   const activeRows = Array.from(
     { length: maxRow - minRow + 1 },
     (_, i) => minRow + i
@@ -241,39 +234,44 @@ const getLevelNumber = (level: string | undefined): number => {
   }
 };
 
-const AddressInput = styled.div<{ $isMinimized: boolean }>`
+const PlayerListPanel = styled.div<{ $isMinimized: boolean }>`
   position: fixed;
   top: 20px;
   left: 20px;
-  transform: none;
   background: rgba(0, 0, 0, 0.7);
   padding: 15px;
   border-radius: 8px;
   color: white;
   z-index: 1000;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-  min-width: 300px;
+  width: 220px; /* Reduced from 300px */
+  max-height: 300px; // Max height before scrolling
+  display: flex;
+  flex-direction: column;
   transition: all 0.3s ease;
-  
+
   ${props => props.$isMinimized && `
+    width: auto; /* Shrink to content width when minimized */
     min-width: unset;
     padding: 10px;
+    max-height: 50px; /* Height of header when minimized */
     cursor: pointer;
     
-    input {
+    .player-list-content {
       display: none;
     }
   `}
 `;
 
-const AddressHeader = styled.div<{ $isMinimized: boolean }>`
+// General Panel Header for minimizable panels
+const PanelHeader = styled.div<{ $isMinimized: boolean }>`
   font-size: 16px;
   font-weight: bold;
   margin-bottom: ${props => props.$isMinimized ? '0' : '10px'};
   color: #fff;
   text-align: center;
-  border-bottom: ${props => props.$isMinimized ? 'none' : '2px solid rgba(255, 255, 255, 0.2)'};
-  padding-bottom: 5px;
+  border-bottom: ${props => props.$isMinimized ? 'none' : '1px solid rgba(255, 255, 255, 0.2)'};
+  padding-bottom: ${props => props.$isMinimized ? '0' : '8px'};
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -281,26 +279,39 @@ const AddressHeader = styled.div<{ $isMinimized: boolean }>`
   user-select: none;
 `;
 
-const AddressField = styled.input`
-  width: 100%;
-  background: rgba(255, 255, 255, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: 4px;
-  padding: 8px 12px;
-  color: white;
-  font-family: monospace;
-  font-size: 14px;
-  
-  &:focus {
-    outline: none;
-    border-color: #7cb3ff;
+const PlayerListContent = styled.div`
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding-right: 5px; // For scrollbar spacing
+
+  label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    padding: 4px;
+    border-radius: 3px;
+    cursor: pointer;
+    &:hover {
+      background: rgba(255, 255, 255, 0.1);
+    }
+  }
+  input[type="checkbox"] {
+    cursor: pointer;
+  }
+  .player-address {
+    font-size: 10px;
+    color: #aaa;
+    margin-left: auto; /* Push address to the right */
   }
 `;
 
 const ZoomControls = styled.div<{ $isMinimized: boolean }>`
   position: fixed;
-  bottom: 20px;
-  right: 20px;
+  bottom: 60px;
+  left: 20px;
   display: flex;
   flex-direction: column;
   gap: 5px;
@@ -315,6 +326,8 @@ const ZoomControls = styled.div<{ $isMinimized: boolean }>`
     .zoom-controls {
       display: none;
     }
+    padding: 10px;
+    width: auto;
   `}
 `;
 
@@ -358,12 +371,6 @@ const ZoomLevel = styled.div`
   text-align: center;
 `;
 
-interface TokenPrice {
-  symbol: string;
-  address: string;
-  ratio: number | null;
-  best_pool: any;
-}
 
 const PriceDisplay = styled.div<{ $isMinimized: boolean }>`
   position: fixed;
@@ -449,32 +456,10 @@ const formatRatio = (ratio: number | null): string => {
   return ratio.toFixed(decimalPlaces);
 };
 
-const normalizeAddress = (address: string): string => {
-  if (!address || typeof address !== 'string') {
-    console.warn('normalizeAddress received invalid input:', address);
-    return ''; // Return an empty string or a specific "invalid" marker
-  }
-  let addr = address.toLowerCase();
-  if (!addr.startsWith('0x')) {
-    // This case should ideally not happen for valid StarkNet addresses.
-    // Depending on requirements, one might throw an error or return original.
-    console.warn('normalizeAddress received address without 0x prefix:', address);
-    return addr; // Or return original 'address' if case should be preserved
-  }
-  // Remove '0x' prefix, convert to BigInt, then back to hex string.
-  // This standardizes the address by removing unnecessary leading zeros after '0x'.
-  try {
-    const bigintAddress = BigInt(addr);
-    return '0x' + bigintAddress.toString(16);
-  } catch (e) {
-    console.error(`Error normalizing address ${address}:`, e);
-    return addr; // Fallback to the lowercased '0x' prefixed address if BigInt conversion fails
-  }
-};
-
 const getTokenInfo = (address: string, prices: TokenPrice[]): { symbol: string; ratio: number | null } => {
-  const normalizedAddress = normalizeAddress(address);
-  const tokenInfo = prices.find(p => normalizeAddress(p.address) === normalizedAddress);
+  if (!address) return { symbol: 'Unknown', ratio: null };
+  const addrKey = address.toLowerCase();
+  const tokenInfo = prices.find(p => p.address.toLowerCase() === addrKey);
   return {
     symbol: tokenInfo?.symbol || 'Unknown',
     ratio: tokenInfo?.ratio || null
@@ -539,11 +524,6 @@ const getValueColor = (price: string | null, profitPerHour: number): string => {
   return '#1a571a';                            // Highest yield = brightest green
 };
 
-interface TaxInfo {
-  taxPaid: number;
-  taxReceived: number;
-  profitPerHour: number;
-}
 
 // Modified getTaxRate
 const getTaxRate = (level: string | undefined, locationNum: number): number => {
@@ -666,12 +646,6 @@ const getOpportunityColor = (profitPerHour: number, landPriceESTRK: number): str
   return `rgba(0, 255, 255, ${intensity})`; // Cyan color for high ROI + high yield borders
 };
 
-const TaxInfo = styled.div`
-  font-size: 10px;
-  color: #aaa;
-  text-align: center;
-  margin-top: 2px;
-`;
 
 const CompactTaxInfo = styled.div`
   font-size: 11px;
@@ -920,22 +894,111 @@ const AuctionElapsedInfo = styled.div`
   color: #fff;
 `;
 
+const TileInfoPanelWrapper = styled.div`
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  background: rgba(0, 0, 0, 0.85);
+  padding: 12px;
+  border-radius: 8px;
+  color: white;
+  z-index: 1001;
+  width: 260px;
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  font-size: 12px;
+  text-align: left;
+
+  h3 {
+    margin-top: 0;
+    margin-bottom: 10px;
+    color: #7cb3ff;
+    text-align: left;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    padding-bottom: 8px;
+    font-size: 15px;
+  }
+
+  h4 {
+    font-size: 13px;
+    color: #aacfff;
+    margin-top: 0;
+    margin-bottom: 6px;
+    text-align: left;
+  }
+
+  p {
+    margin: 6px 0;
+    line-height: 1.4;
+  }
+
+  strong {
+    color: #a0cfff;
+  }
+
+  .info-section {
+    margin-bottom: 10px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  }
+  .info-section:last-child {
+    border-bottom: none;
+    margin-bottom: 0;
+    padding-bottom: 0;
+  }
+
+  .close-button {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    background: none;
+    border: none;
+    color: #999;
+    font-size: 20px;
+    cursor: pointer;
+    line-height: 1;
+    padding: 3px;
+  }
+  .close-button:hover {
+    color: white;
+  }
+`;
+
+const InfoLine = styled.div`
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px; /* Small gap between lines */
+
+  span:first-child {
+    font-weight: bold;
+    color: #a0cfff; /* Label color */
+  }
+  span:last-child {
+    text-align: right;
+  }
+`;
+
+const SQL_API_URL = import.meta.env.VITE_SQL_API_URL;
+
+const SQL_GET_PONZI_LANDS = `SELECT location, token_used, sell_price, owner, level FROM "ponzi_land-Land"`;
+const SQL_GET_PONZI_LAND_AUCTIONS = `SELECT land_location, floor_price, start_time, start_price, decay_rate, is_finished FROM "ponzi_land-Auction"`;
+const SQL_GET_PONZI_LANDS_STAKE = `SELECT location, amount FROM "ponzi_land-LandStake"`;
+
 const PonzilandMap = () => {
-  const { loading: landsLoading, error: landsError, data: landsData } = useQuery(GET_PONZI_LANDS, {
-    pollInterval: 5000,
-  });
-  
-  const { loading: auctionsLoading, error: auctionsError, data: auctionsData } = useQuery(GET_PONZI_LAND_AUCTIONS, {
-    pollInterval: 5000,
-  });
-
-  const { loading: stakesLoading, error: stakesError, data: stakesData } = useQuery(GET_PONZI_LANDS_STAKE, {
-    pollInterval: 5000,
-  });
-
   const mapRef = useRef<HTMLDivElement>(null);
   const [zoom, setZoom] = useState(1);
   const [prices, setPrices] = useState<TokenPrice[]>([]);
+
+  // New state for SQL fetched data
+  const [landsSqlData, setLandsSqlData] = useState<PonziLand[]>([]);
+  const [auctionsSqlData, setAuctionsSqlData] = useState<PonziLandAuction[]>([]);
+  const [stakesSqlData, setStakesSqlData] = useState<PonziLandStake[]>([]);
+  const [loadingSql, setLoadingSql] = useState(true);
+  const [errorSql, setErrorSql] = useState<string | null>(null);
+  
   const [gridData, setGridData] = useState<{
     tiles: (PonziLand | null)[];
     activeRows: number[];
@@ -943,9 +1006,12 @@ const PonzilandMap = () => {
   }>({ tiles: [], activeRows: [], activeCols: [] });
   const [isPriceMinimized, setIsPriceMinimized] = useState(false);
   const [activeAuctions, setActiveAuctions] = useState<Record<number, PonziLandAuction>>({});
-  const [userAddress, setUserAddress] = useState(MY_ADDRESS);
-  const [isAddressMinimized, setIsAddressMinimized] = useState(false);
+  const [selectedPlayerAddresses, setSelectedPlayerAddresses] = useState<Set<string>>(new Set());
+  const [isPlayerListMinimized, setIsPlayerListMinimized] = useState(false);
   const [isZoomMinimized, setIsZoomMinimized] = useState(false);
+  const [usernameCache, setUsernameCache] = useState<Record<string, string>>({});
+  const [allPlayers, setAllPlayers] = useState<Array<{ address: string; displayName: string; originalAddress: string }>>([]);
+  const [selectedTileData, setSelectedTileData] = useState<SelectedTileDetails | null>(null);
 
   useEffect(() => {
     const fetchPrices = async () => {
@@ -965,64 +1031,235 @@ const PonzilandMap = () => {
   }, []);
 
   useEffect(() => {
-    if (landsData?.ponziLandLandModels?.edges && stakesData?.ponziLandLandStakeModels?.edges) {
-      const lands = landsData.ponziLandLandModels.edges.map(
-        (edge: { node: PonziLand }) => edge.node
-      );
-      const stakes = stakesData.ponziLandLandStakeModels.edges.map(
-        (edge: { node: PonziLandStake }) => edge.node
-      );
-      setGridData(processGridData(lands, stakes));
-    }
-  }, [landsData, stakesData]);
+    const fetchSql = async <T,>(query: string, queryName: string): Promise<T[]> => {
+      const encodedQuery = encodeURIComponent(query);
+      const fullUrl = `${SQL_API_URL}?query=${encodedQuery}`;
+
+      try {
+        const response = await fetch(fullUrl, {
+          method: 'GET',
+          headers: { 'Accept': 'application/json' },
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error(`SQL Query HTTP Error for ${queryName}`, {
+            status: response.status,
+            statusText: response.statusText,
+            url: fullUrl,
+            errorResponseText: errorText,
+          });
+          throw new Error(`SQL HTTP Error (${queryName}): ${response.status} ${response.statusText}. Details: ${errorText.substring(0, 200)}`);
+        }
+        const result = await response.json();
+        return result as T[]; 
+      } catch (error: any) {
+        console.error(`Full error in fetchSql for ${queryName} (URL: ${fullUrl}):`, error);
+        const errorMessage = error.message || `An unexpected error occurred in fetchSql for ${queryName}.`;
+        throw new Error(errorMessage);
+      }
+    };
+
+    const fetchAllSqlData = async (isInitialLoad: boolean) => {
+      if (isInitialLoad) {
+        setLoadingSql(true);
+      }
+      setErrorSql(null);
+
+      try {
+        const [landsResult, auctionsResult, stakesResult] = await Promise.all([
+          fetchSql<PonziLand>(SQL_GET_PONZI_LANDS, "GetPonziLands"),
+          fetchSql<PonziLandAuction>(SQL_GET_PONZI_LAND_AUCTIONS, "GetPonziLandAuctions"),
+          fetchSql<PonziLandStake>(SQL_GET_PONZI_LANDS_STAKE, "GetPonziLandsStake"),
+        ]);
+        
+        setLandsSqlData(landsResult || []);
+        setAuctionsSqlData(auctionsResult || []);
+        setStakesSqlData(stakesResult || []);
+
+      } catch (err: any) {
+        console.error('Error in fetchAllSqlData:', err);
+        setErrorSql(err.message || 'Failed to fetch one or more SQL datasets');
+      } finally {
+        if (isInitialLoad) {
+          setLoadingSql(false);
+        }
+      }
+    };
+
+    fetchAllSqlData(true); // Initial fetch with loading indicator
+    const intervalId = setInterval(() => fetchAllSqlData(false), 5000); // Polls without full loading indicator
+
+    return () => clearInterval(intervalId);
+  }, []);
 
   useEffect(() => {
-    if (auctionsData?.ponziLandAuctionModels?.edges) {
-      const auctions = auctionsData.ponziLandAuctionModels.edges
-        .map((edge: { node: PonziLandAuction }) => edge.node)
+    if (landsSqlData && stakesSqlData && landsSqlData.length > 0) {
+      setGridData(processGridData(landsSqlData, stakesSqlData));
+    } else if (!loadingSql && landsSqlData && landsSqlData.length === 0) {
+       setGridData({ tiles: Array(GRID_SIZE * GRID_SIZE).fill(null), activeRows: [], activeCols: [] });
+    }
+  }, [landsSqlData, stakesSqlData, loadingSql]);
+
+  useEffect(() => {
+    if (auctionsSqlData) {
+      const filteredAuctions = auctionsSqlData
         .filter((auction: PonziLandAuction) => !auction.is_finished)
         .reduce((acc: Record<number, PonziLandAuction>, auction: PonziLandAuction) => {
-          acc[auction.land_location] = auction;
+          acc[Number(auction.land_location)] = auction;
           return acc;
         }, {});
-      setActiveAuctions(auctions);
+      setActiveAuctions(filteredAuctions);
     }
-  }, [auctionsData]);
+  }, [auctionsSqlData]);
 
   useEffect(() => {
     document.title = "Ponziland ROI Map";
   }, []);
 
+  useEffect(() => {
+    if (gridData.tiles.length === 0 && !loadingSql) {
+      setAllPlayers([]);
+      return;
+    }
+
+    const ownerAddressesFromMap = new Set<string>();
+    gridData.tiles.forEach(tile => {
+      if (tile?.owner) {
+        ownerAddressesFromMap.add(tile.owner);
+      }
+    });
+
+    const addressesToFetchUsernamesFor: string[] = [];
+    
+    ownerAddressesFromMap.forEach(mapOwnerAddr => {
+      if (!usernameCache[mapOwnerAddr.toLowerCase()]) {
+        addressesToFetchUsernamesFor.push(mapOwnerAddr);
+      }
+    });
+    
+    if (addressesToFetchUsernamesFor.length > 0) {
+      const fetchUsernamesForSpecificAddresses = async () => {
+        try {
+          const response = await fetch('/api/usernames', { 
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ addresses: addressesToFetchUsernamesFor }),
+          });
+          if (response.ok) {
+            const fetchedData = await response.json();
+            setUsernameCache(prevCache => {
+              const newCache = { ...prevCache };
+              if (Array.isArray(fetchedData)) {
+                fetchedData.forEach((item: {username: string, address: string}) => {
+                  if (item.address && item.username) {
+                    newCache[item.address.toLowerCase()] = item.username;
+                  }
+                });
+              } else {
+                Object.assign(newCache, fetchedData);
+              }
+              return newCache;
+            });
+          } else {
+            // console.error("Failed to fetch usernames:", await response.text());
+          }
+        } catch (error) {
+          // console.error("Error fetching usernames:", error);
+        }
+      };
+      fetchUsernamesForSpecificAddresses();
+    }
+
+    const uniqueOwnerEntriesForPlayerList = new Map<string, { address: string; displayName: string; originalAddress: string }>();
+    ownerAddressesFromMap.forEach(mapOwnerAddr => {
+      const addrKey = mapOwnerAddr.toLowerCase();
+      const username = usernameCache[addrKey];
+      if (!uniqueOwnerEntriesForPlayerList.has(addrKey)) {
+          uniqueOwnerEntriesForPlayerList.set(addrKey, {
+            address: addrKey,
+            originalAddress: mapOwnerAddr, 
+            displayName: username || `${mapOwnerAddr.slice(0,6)}...${mapOwnerAddr.slice(-4)}`
+        });
+      }
+    });
+
+    const sortedPlayers = Array.from(uniqueOwnerEntriesForPlayerList.values()).sort((a,b) => a.displayName.localeCompare(b.displayName));
+    setAllPlayers(sortedPlayers);
+
+  }, [gridData.tiles, usernameCache, loadingSql]);
+
   const handleZoom = (delta: number) => {
     setZoom(prev => Math.max(0.5, Math.min(2, prev + delta)));
   };
 
-  if (landsLoading || auctionsLoading || stakesLoading) return <div>Loading...</div>;
-  if (landsError || auctionsError || stakesError) 
-    return <div>Error loading data: {landsError?.message || auctionsError?.message || stakesError?.message}</div>;
+  if (loadingSql) return <div style={{ color: 'white', textAlign: 'center', paddingTop: '50px', fontSize: '20px' }}>Loading Ponziland Data...</div>;
+  if (errorSql && landsSqlData.length === 0) { 
+    return <div style={{ color: 'red', textAlign: 'center', paddingTop: '50px', fontSize: '20px' }}>Error loading data: {errorSql}</div>;
+  }
+
+  const handlePlayerSelectionChange = (address: string, isSelected: boolean) => {
+    setSelectedPlayerAddresses(prevSelected => {
+      const newSelected = new Set(prevSelected);
+      const addrKey = address.toLowerCase(); // Use toLowerCase for Set consistency
+      if (isSelected) {
+        newSelected.add(addrKey);
+      } else {
+        newSelected.delete(addrKey);
+      }
+      return newSelected;
+    });
+  };
+
+  const handleTileClick = (tileDetails: SelectedTileDetails) => {
+    setSelectedTileData(tileDetails);
+  };
 
   return (
     <MapWrapper ref={mapRef}>
-      <AddressInput $isMinimized={isAddressMinimized}>
-        <AddressHeader 
-          $isMinimized={isAddressMinimized}
-          onClick={() => setIsAddressMinimized(!isAddressMinimized)}
+      {errorSql && !loadingSql && landsSqlData.length > 0 && 
+        <div style={{
+          position: 'fixed', top: '10px', left: '50%', transform: 'translateX(-50%)',
+          background: 'rgba(255, 0, 0, 0.7)', color: 'white', padding: '5px 10px', 
+          borderRadius: '5px', zIndex: 2000, fontSize: '12px'
+        }}>
+          Update failed: {errorSql.length > 50 ? errorSql.substring(0,50)+"..." : errorSql} (showing previous data)
+        </div>
+      }
+      <PlayerListPanel $isMinimized={isPlayerListMinimized}>
+        <PanelHeader
+          $isMinimized={isPlayerListMinimized}
+          onClick={() => setIsPlayerListMinimized(!isPlayerListMinimized)}
         >
-          Your Address
+          Players
           <MinimizeButton>
-            {isAddressMinimized ? '+' : '−'}
+            {isPlayerListMinimized ? '+' : '−'}
           </MinimizeButton>
-        </AddressHeader>
-        <AddressField
-          type="text"
-          value={userAddress}
-          onChange={(e) => setUserAddress(e.target.value)}
-          placeholder="Enter your address..."
-        />
-      </AddressInput>
-
+        </PanelHeader>
+        <PlayerListContent className="player-list-content">
+          {allPlayers.map(player => {
+            return (
+              <label key={player.address}> 
+                <input 
+                  type="checkbox" 
+                  checked={selectedPlayerAddresses.has(player.address)}
+                  onChange={(e) => handlePlayerSelectionChange(player.originalAddress, e.target.checked)}
+                />
+                {player.displayName} 
+                <span className="player-address">({player.originalAddress.slice(0,4)}...{player.originalAddress.slice(-3)})</span> 
+              </label>
+            );
+          })}
+          {allPlayers.length === 0 && !loadingSql && <p style={{textAlign: 'center', fontSize: '11px', color: '#888'}}>
+             No players found on map.
+            </p>}
+          {allPlayers.length === 0 && loadingSql && <p style={{textAlign: 'center', fontSize: '11px', color: '#888'}}>
+             Loading players...
+            </p>}
+        </PlayerListContent>
+      </PlayerListPanel>
       <ZoomControls $isMinimized={isZoomMinimized}>
-        <AddressHeader 
+        <PanelHeader
           $isMinimized={isZoomMinimized}
           onClick={() => setIsZoomMinimized(!isZoomMinimized)}
         >
@@ -1030,7 +1267,7 @@ const PonzilandMap = () => {
           <MinimizeButton>
             {isZoomMinimized ? '+' : '−'}
           </MinimizeButton>
-        </AddressHeader>
+        </PanelHeader>
         <div className="zoom-controls">
           <ZoomControlsRow>
             <ZoomButton onClick={() => handleZoom(-0.1)}>−</ZoomButton>
@@ -1047,12 +1284,12 @@ const PonzilandMap = () => {
           gridTemplateRows: `repeat(${gridData.activeRows.length}, 100px)`
         }}
       >
-        {gridData.activeRows.map(row =>
+         {gridData.activeRows.map(row =>
           gridData.activeCols.map(col => {
             const location = row * GRID_SIZE + col;
             const land = gridData.tiles[location];
             const auction = activeAuctions[location];
-            const isMyLand = land?.owner === userAddress;
+            const isHighlighted = land?.owner ? selectedPlayerAddresses.has(land.owner.toLowerCase()) : false;
             const { symbol, ratio } = getTokenInfo(land?.token_used || '', prices);
             
             const taxInfo = calculateTaxInfo(location, gridData.tiles, prices, activeAuctions);
@@ -1063,20 +1300,55 @@ const PonzilandMap = () => {
             ) : '#1a1a1a';
             
             const opportunityColor = getOpportunityColor(taxInfo.profitPerHour, landPriceESTRK);
+            const burnRate = land ? calculateBurnRate(land, gridData.tiles, activeAuctions) : 0;
+            const nukableStatus = land ? isNukable(land, burnRate) : false;
+            const potentialYieldAuction = auction ? calculatePotentialYield(Number(land?.location), gridData.tiles, prices, activeAuctions) : undefined;
+
+            // Add auctionROI calculation
+            let auctionROIForDetails: number | undefined = undefined;
+            let currentAuctionPriceForTileDisplay: number | undefined = undefined;
+
+            if (auction) {
+                currentAuctionPriceForTileDisplay = calculateAuctionPrice(auction);
+                const currentYield = potentialYieldAuction || 0;
+                // Only calculate and show ROI if price is positive and yield is positive
+                if (currentAuctionPriceForTileDisplay > 0 && currentYield > 0) {
+                    auctionROIForDetails = (currentYield / currentAuctionPriceForTileDisplay) * 100;
+                }
+            }
+
+            const currentTileDetails: SelectedTileDetails = {
+              location,
+              coords: displayCoordinates(col, row),
+              land,
+              auction,
+              taxInfo,
+              symbol,
+              ratio,
+              landPriceESTRK,
+              valueColor,
+              opportunityColor,
+              isMyLand: isHighlighted,
+              burnRate,
+              nukableStatus,
+              potentialYieldAuction,
+              auctionROI: auctionROIForDetails
+            };
 
             return (
               <Tile
                 key={`${row}-${col}`}
                 data-row={row}
                 data-col={col}
-                $isMyLand={isMyLand}
-                $level={getLevelNumber(land?.level)}
+                onClick={() => handleTileClick(currentTileDetails)}
+                $isMyLand={isHighlighted}
+                $level={getLevelNumber(land?.level)} 
                 $isEmpty={!land}
                 $valueColor={valueColor}
                 $isAuction={!!auction}
                 $opportunityColor={opportunityColor}
-                $isNukable={land ? isNukable(land, calculateBurnRate(land, gridData.tiles, activeAuctions)) : false}
-                $auctionYield={auction ? calculatePotentialYield(Number(land?.location), gridData.tiles, prices, activeAuctions) : undefined}
+                $isNukable={nukableStatus}
+                $auctionYield={potentialYieldAuction}
               >
                 <TileLocation>{displayCoordinates(col, row)}</TileLocation>
                 {land && (
@@ -1085,8 +1357,13 @@ const PonzilandMap = () => {
                       <TileLevel>L{getLevelNumber(land.level)}</TileLevel>
                       <TileHeader>AUCTION</TileHeader>
                       <CompactTaxInfo>
-                        <div style={{ color: '#4CAF50' }}>Yield: {formatYield(calculatePotentialYield(Number(land.location), gridData.tiles, prices, activeAuctions))}</div>
-                        <div>{calculateAuctionPrice(auction).toFixed(2)} nftSTRK</div>
+                        <div>Yield: {formatYield(potentialYieldAuction || 0)}</div>
+                        <div>{currentAuctionPriceForTileDisplay !== undefined ? currentAuctionPriceForTileDisplay.toFixed(2) : 'N/A'} nftSTRK</div>
+                        {auctionROIForDetails !== undefined && (
+                          <div style={{ color: auctionROIForDetails > 0 ? '#4CAF50' : (auctionROIForDetails < 0 ? '#ff6b6b' : 'white') }}>
+                            ROI: {auctionROIForDetails.toFixed(1)}%/h
+                          </div>
+                        )}
                       </CompactTaxInfo>
                       <AuctionElapsedInfo>
                         {(() => {
@@ -1137,8 +1414,8 @@ const PonzilandMap = () => {
                           <div>Not for sale</div>
                         )}
                       </CompactTaxInfo>
-                      <StakedInfo $isNukable={land ? isNukable(land, calculateBurnRate(land, gridData.tiles, activeAuctions)) : false}>
-                        {formatTimeRemaining(hexToDecimal(land.staked_amount || '0x0') / calculateBurnRate(land, gridData.tiles, activeAuctions))}
+                      <StakedInfo $isNukable={nukableStatus}>
+                        {formatTimeRemaining(hexToDecimal(land.staked_amount || '0x0') / burnRate)}
                       </StakedInfo>
                     </>
                   )
@@ -1173,6 +1450,139 @@ const PonzilandMap = () => {
       <GameLink href="https://play.ponzi.land/game" target="_blank" rel="noopener noreferrer">
         🎮 Play Ponziland
       </GameLink>
+
+      {selectedTileData && (
+        <TileInfoPanelWrapper>
+          <button className="close-button" onClick={() => setSelectedTileData(null)}>&times;</button>
+          <h3>
+            {selectedTileData.coords} (L{selectedTileData.land ? getLevelNumber(selectedTileData.land.level) : 'N/A'}) 
+            {selectedTileData.auction ? "- AUCTION" : 
+              (selectedTileData.land?.owner ? 
+                `- ${(usernameCache[selectedTileData.land.owner.toLowerCase()] || selectedTileData.land.owner.slice(0,4)+"..."+selectedTileData.land.owner.slice(-3))}` : 
+                (selectedTileData.land ? "- Unowned" : "- Empty")
+              )}
+          </h3>
+          
+          {selectedTileData.isMyLand && <p style={{ color: 'gold', fontWeight: 'bold' }}>★ Highlighted Land {(selectedTileData.land?.owner && usernameCache[selectedTileData.land.owner.toLowerCase()]) || ''}</p>}
+
+          {selectedTileData.land ? (
+            <>
+              {selectedTileData.auction ? (
+                <div className="info-section">
+                  <h4>Auction</h4>
+                  <InfoLine>
+                    <span>Price:</span>
+                    <span>{calculateAuctionPrice(selectedTileData.auction).toFixed(2)} nftSTRK</span>
+                  </InfoLine>
+                  <InfoLine>
+                    <span>Yield:</span>
+                    <span style={{ color: (selectedTileData.potentialYieldAuction || 0) > 0 ? '#4CAF50' : 'white' }}>
+                      {formatYield(selectedTileData.potentialYieldAuction || 0)}
+                    </span>
+                  </InfoLine>
+                  {/* Display Auction ROI in Info Panel */}
+                  {selectedTileData.auctionROI !== undefined && (
+                    <InfoLine>
+                      <span>ROI/hr:</span>
+                      <span style={{ color: selectedTileData.auctionROI > 0 ? '#4CAF50' : (selectedTileData.auctionROI < 0 ? '#ff6b6b' : 'white')}}>
+                        {selectedTileData.auctionROI.toFixed(1)}%
+                      </span>
+                    </InfoLine>
+                  )}
+                  <InfoLine>
+                    <span>Ends In:</span>
+                    <span>{(() => {
+                      const elapsed = getElapsedSeconds(selectedTileData.auction);
+                      const remaining = AUCTION_DURATION - elapsed;
+                      if (remaining <=0) return "Ended";
+                      const hours = Math.floor(remaining / 3600);
+                      const minutes = Math.floor((remaining % 3600) / 60);
+                      if (hours > 0) return `${hours}h ${minutes}m`;
+                      return `${minutes}m`;
+                    })()}</span>
+                  </InfoLine>
+                </div>
+              ) : (
+                <>
+                  <div className="info-section">
+                    <h4>Finances</h4>
+                    <InfoLine>
+                      <span>Profit/hr:</span>
+                      <span style={{ color: selectedTileData.taxInfo.profitPerHour > 0 ? '#4CAF50' : (selectedTileData.taxInfo.profitPerHour < 0 ? '#ff6b6b' : 'white')}}>
+                        {selectedTileData.taxInfo.profitPerHour > 0 ? '+':''}{selectedTileData.taxInfo.profitPerHour.toFixed(1)}/h
+                      </span>
+                    </InfoLine>
+                    {selectedTileData.land.sell_price ? (
+                      <>
+                        <InfoLine>
+                          <span>Price:</span>
+                          <span>{formatOriginalPrice(selectedTileData.land.sell_price)} {selectedTileData.symbol}</span>
+                        </InfoLine>
+                        {selectedTileData.symbol !== 'nftSTRK' && selectedTileData.ratio !== null && (
+                          <InfoLine>
+                            <span>Value:</span>
+                            <span>{calculateESTRKPrice(selectedTileData.land.sell_price, selectedTileData.ratio)} nftSTRK</span>
+                          </InfoLine>
+                        )}
+                        {selectedTileData.landPriceESTRK > 0 && (
+                           <InfoLine>
+                            <span>ROI/hr:</span>
+                            <span style={{ color: calculateROI(selectedTileData.taxInfo.profitPerHour, selectedTileData.landPriceESTRK) > 0 ? '#4CAF50' : '#ff6b6b' }}>
+                              {calculateROI(selectedTileData.taxInfo.profitPerHour, selectedTileData.landPriceESTRK).toFixed(1)}%
+                            </span>
+                          </InfoLine>
+                        )}
+                      </>
+                    ) : (
+                      <InfoLine>
+                        <span>Price:</span>
+                        <span>Not for sale</span>
+                      </InfoLine>
+                    )}
+                  </div>
+
+                  <div className="info-section">
+                    <h4>Staking</h4>
+                    <InfoLine>
+                      <span>Staked:</span>
+                      <span>{hexToDecimal(selectedTileData.land.staked_amount || '0x0').toFixed(2)} {selectedTileData.symbol}</span>
+                    </InfoLine>
+                    <InfoLine>
+                      <span>Burn/hr:</span>
+                      <span>{selectedTileData.burnRate > 0 ? selectedTileData.burnRate.toFixed(2) : '0.00'} {selectedTileData.symbol}</span>
+                    </InfoLine>
+                    <InfoLine>
+                      <span>Time Left:</span>
+                      <span style={{
+                        color: selectedTileData.nukableStatus === 'nukable' ? '#ff6b6b' : (selectedTileData.nukableStatus === 'warning' ? 'orange' : '#4CAF50'),
+                        fontWeight: selectedTileData.nukableStatus !== false ? 'bold' : 'normal'
+                      }}>
+                        {selectedTileData.burnRate > 0 ? formatTimeRemaining(hexToDecimal(selectedTileData.land.staked_amount || '0x0') / selectedTileData.burnRate) : (hexToDecimal(selectedTileData.land.staked_amount || '0x0') > 0 ? '∞ (no burn)' : 'N/A')}
+                      </span>
+                    </InfoLine>
+                  </div>
+
+                  {(selectedTileData.taxInfo.taxPaid > 0 || selectedTileData.taxInfo.taxReceived > 0) && (
+                    <div className="info-section">
+                      <h4>Tax Details</h4>
+                      <InfoLine>
+                        <span>Paid/hr:</span>
+                        <span>-{selectedTileData.taxInfo.taxPaid.toFixed(1)}</span>
+                      </InfoLine>
+                      <InfoLine>
+                        <span>Recv/hr:</span>
+                        <span>+{selectedTileData.taxInfo.taxReceived.toFixed(1)}</span>
+                      </InfoLine>
+                    </div>
+                  )}
+                </>
+              )}
+            </>
+          ) : (
+            <p>This is an empty plot of land.</p>
+          )}
+        </TileInfoPanelWrapper>
+      )}
     </MapWrapper>
   );
 };

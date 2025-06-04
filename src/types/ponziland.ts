@@ -1,7 +1,4 @@
 export interface PonziLand {
-  entity: {
-    id: string;
-  };
   location: string;
   token_used: string;
   sell_price: string;
@@ -10,19 +7,7 @@ export interface PonziLand {
   staked_amount?: string;
 }
 
-export interface PonziLandResponse {
-  ponziLandLandModels: {
-    edges: Array<{
-      node: PonziLand;
-    }>;
-    totalCount: number;
-  };
-}
-
 export interface PonziLandAuction {
-  entity: {
-    id: string;
-  };
   land_location: number;
   start_time: string;
   start_price: string;
@@ -31,28 +16,39 @@ export interface PonziLandAuction {
   floor_price?: string;
 }
 
-export interface PonziLandAuctionResponse {
-  ponziLandAuctionModels: {
-    edges: Array<{
-      node: PonziLandAuction;
-    }>;
-    totalCount: number;
-  };
-}
-
 export interface PonziLandStake {
-  entity: {
-    id: string;
-  };
   location: string;
   amount: string;
 }
 
-export interface PonziLandStakeResponse {
-  ponziLandLandStakeModels: {
-    edges: Array<{
-      node: PonziLandStake;
-    }>;
-    totalCount: number;
-  };
-} 
+
+export interface TokenPrice {
+  symbol: string;
+  address: string;
+  ratio: number | null;
+  best_pool: any;
+}
+
+export interface TaxInfo {
+  taxPaid: number;
+  taxReceived: number;
+  profitPerHour: number;
+}
+
+export interface SelectedTileDetails {
+  location: number;
+  coords: string;
+  land: PonziLand | null;
+  auction: PonziLandAuction | null;
+  taxInfo: TaxInfo;
+  symbol: string;
+  ratio: number | null;
+  landPriceESTRK: number;
+  valueColor: string;
+  opportunityColor: string;
+  isMyLand: boolean;
+  burnRate: number;
+  nukableStatus: 'nukable' | 'warning' | false;
+  potentialYieldAuction?: number;
+  auctionROI?: number;
+}
