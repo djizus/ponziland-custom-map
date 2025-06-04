@@ -1,5 +1,9 @@
 // api/usernames.ts
 
+export const config = {
+  runtime: 'edge',
+};
+
 export const POST = async ({ request }: { request: Request }) => {
   try {
     const body = await request.json();
