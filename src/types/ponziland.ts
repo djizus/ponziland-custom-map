@@ -35,12 +35,20 @@ export interface TaxInfo {
   profitPerHour: number;
 }
 
+export interface YieldInfo {
+  totalYield: number;
+  yieldPerHour: number;
+  taxPaidTotal: number;
+}
+
 export interface SelectedTileDetails {
   location: number;
   coords: string;
   land: PonziLand | null;
   auction: PonziLandAuction | null;
   taxInfo: TaxInfo;
+  yieldInfo: YieldInfo;
+  auctionYieldInfo?: YieldInfo;
   symbol: string;
   ratio: number | null;
   landPriceESTRK: number;

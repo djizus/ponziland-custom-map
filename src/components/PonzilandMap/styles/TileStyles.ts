@@ -1,0 +1,134 @@
+import styled from 'styled-components';
+import { PULSE_ANIMATION } from '../../../constants/ponziland';
+
+export const Tile = styled.div<{
+  $isMyLand: boolean;
+  $level: number;
+  $isEmpty: boolean;
+  $valueColor: string;
+  $isAuction: boolean;
+  $opportunityColor: string;
+  $isNukable: 'nukable' | 'warning' | false;
+  $auctionYield?: number;
+}>`
+  ${PULSE_ANIMATION}
+  position: relative;
+  width: 100px;
+  height: 100px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background-color: ${props => {
+    if (props.$isEmpty) return '#1a1a1a';
+    if (props.$isNukable === 'warning') return '#4d3015'; // Orange background for warning state
+    return props.$valueColor;
+  }};
+  border: ${props => {
+    if (props.$isMyLand) {
+      return '3px solid gold';
+    }
+    return `2px solid ${props.$opportunityColor}`;
+  }};
+  box-shadow: ${props => {
+    if (props.$isMyLand) {
+      return props.$opportunityColor !== '#333' 
+        ? `0 0 15px rgba(255, 215, 0, 0.5), 0 0 10px ${props.$opportunityColor}`
+        : '0 0 15px rgba(255, 215, 0, 0.5)';
+    }
+    if (props.$opportunityColor !== '#333') {
+      return `0 0 10px ${props.$opportunityColor}`;
+    }
+    return 'none';
+  }};
+  animation: none;
+  color: white;
+  font-size: 14px;
+  transition: all 0.3s ease;
+
+  &:hover {
+    transform: scale(1.05);
+    z-index: 1;
+  }
+`;
+
+export const TileHeader = styled.div`
+  font-weight: bold;
+  color: #7cb3ff;
+  font-size: 14px;
+  margin-bottom: 4px;
+  text-align: center;
+`;
+
+export const TileLocation = styled.div`
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  background: rgba(0, 0, 0, 0.5);
+  padding: 2px 4px;
+  border-radius: 3px;
+  font-size: 9px;
+  color: #fff;
+`;
+
+export const TileLevel = styled.div`
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  background: rgba(0, 0, 0, 0.5);
+  padding: 2px 4px;
+  border-radius: 3px;
+  font-size: 9px;
+  color: #fff;
+`;
+
+export const CompactTaxInfo = styled.div`
+  font-size: 11px;
+  color: #bbb;
+  text-align: center;
+  line-height: 1.2;
+`;
+
+export const StakedInfo = styled.div<{ $isNukable: 'nukable' | 'warning' | false }>`
+  position: absolute;
+  bottom: 2px;
+  left: 2px;
+  background: ${props => {
+    switch (props.$isNukable) {
+      case 'nukable':
+        return 'rgba(255, 0, 0, 0.5)';
+      case 'warning':
+        return 'rgba(255, 165, 0, 0.5)';
+      default:
+        return 'rgba(0, 0, 0, 0.5)';
+    }
+  }};
+  padding: 2px 4px;
+  border-radius: 3px;
+  font-size: 9px;
+  color: ${props => {
+    switch (props.$isNukable) {
+      case 'nukable':
+        return '#ff9999';
+      case 'warning':
+        return '#ffd700';
+      default:
+        return '#fff';
+    }
+  }};
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+`;
+
+export const AuctionElapsedInfo = styled.div`
+  position: absolute;
+  bottom: 2px;
+  left: 2px;
+  background: rgba(0, 0, 0, 0.5);
+  padding: 2px 4px;
+  border-radius: 3px;
+  font-size: 9px;
+  color: #fff;
+`; 
