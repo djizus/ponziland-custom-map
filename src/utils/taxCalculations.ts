@@ -2,6 +2,7 @@ import { PonziLand, PonziLandAuction, TokenPrice, TaxInfo, YieldInfo } from '../
 import { TAX_RATE_RAW, TIME_SPEED_FACTOR } from '../constants/ponziland';
 import { getNeighborLocations } from './dataProcessing';
 import { getTokenInfo, getTokenInfoCached, convertToESTRK, hexToDecimal } from './formatting';
+import { performanceCache } from './performanceCache';
 
 export const getTaxRate = (level: string | undefined, locationNum: number): number => {
   const numCardinalNeighbors = getNeighborLocations(locationNum).length;
@@ -140,121 +141,44 @@ export const calculatePotentialYield = (
 
 export const calculateTimeRemainingHours = (land: PonziLand | null, burnRate: number): number => {
   if (!land || burnRate <= 0) return Infinity;
-  const stakedAmount = hexToDecimal(land.staked_amount || '0x0');
-  if (stakedAmount <= 0) return 0;
-  return stakedAmount / burnRate;
-};
-
-export const calculateTotalYieldInfo = (
-  location: number,
-  lands: (PonziLand | null)[],
-  prices: TokenPrice[],
-  activeAuctions: Record<number, PonziLandAuction>
-): { totalYield: number; yieldPerHour: number; taxPaidTotal: number } => {
-  const currentLand = lands[location];
-  if (!currentLand || activeAuctions[location]) {
-    return { totalYield: 0, yieldPerHour: 0, taxPaidTotal: 0 };
-  }
-
-  const neighbors = getNeighborLocations(location);
-  const { symbol: mySymbol, ratio: myRatio } = getTokenInfo(currentLand.token_used, prices);
-  const myPriceESTRK = convertToESTRK(currentLand.sell_price, mySymbol, myRatio);
+  if (!land.location) return 0;
   
-  let totalYieldReceived = 0;
-  let yieldPerHourReceived = 0;
-  let totalTaxPaid = 0;
-  let yieldPerHourPaid = 0;
-
-  // Calculate our own time remaining first (needed for both tax calculations)
-  const myBurnRate = calculateBurnRate(currentLand, lands, activeAuctions);
-  const myTimeRemaining = calculateTimeRemainingHours(currentLand, myBurnRate);
-
-  // Calculate tax received from neighbors (considering both our time and their nuke times)
-  neighbors.forEach(neighborLoc => {
-    const neighbor = lands[neighborLoc];
-    if (neighbor && !activeAuctions[neighborLoc] && neighbor.owner && neighbor.sell_price) {
-      // Calculate neighbor's burn rate and time remaining first
-      const neighborBurnRate = calculateBurnRate(neighbor, lands, activeAuctions);
-      const neighborTimeRemaining = calculateTimeRemainingHours(neighbor, neighborBurnRate);
-      
-      // Only include neighbors that have stake left (not already nuked)
-      if (neighborTimeRemaining > 0) {
-        const { symbol: neighborSymbol, ratio: neighborRatio } = getTokenInfo(neighbor.token_used, prices);
-        const neighborPriceESTRK = convertToESTRK(neighbor.sell_price, neighborSymbol, neighborRatio);
-        const neighborTaxRate = getTaxRate(neighbor.level, Number(neighbor.location));
-        const neighborHourlyTax = neighborPriceESTRK * neighborTaxRate;
-        
-        yieldPerHourReceived += neighborHourlyTax;
-        
-        // We receive tax for the minimum of: our remaining time OR neighbor's remaining time
-        // (if we get nuked, we stop receiving; if neighbor gets nuked, they stop paying)
-        const taxReceivingDuration = Math.min(myTimeRemaining, neighborTimeRemaining);
-        totalYieldReceived += neighborHourlyTax * taxReceivingDuration;
-      }
-    }
+  const location = parseInt(land.location);
+  return performanceCache.getTimeRemaining(location, () => {
+    const stakedAmount = hexToDecimal(land.staked_amount || '0x0');
+    if (stakedAmount <= 0) return 0;
+    return stakedAmount / burnRate;
   });
-
-  // Calculate tax paid to neighbors (considering both our time and each neighbor's time)
-  if (currentLand.sell_price) {
-    const myTaxRate = getTaxRate(currentLand.level, Number(currentLand.location));
-    
-    neighbors.forEach(neighborLoc => {
-      const neighbor = lands[neighborLoc];
-      if (neighbor && !activeAuctions[neighborLoc] && neighbor.owner) {
-        // Calculate neighbor's time remaining first
-        const neighborBurnRate = calculateBurnRate(neighbor, lands, activeAuctions);
-        const neighborTimeRemaining = calculateTimeRemainingHours(neighbor, neighborBurnRate);
-        
-        // Only pay tax to neighbors that have stake left (not already nuked)
-        if (neighborTimeRemaining > 0) {
-          const hourlyTaxPaid = myPriceESTRK * myTaxRate;
-          yieldPerHourPaid += hourlyTaxPaid;
-          
-          // We pay tax for the minimum of: our remaining time OR neighbor's remaining time
-          // (whichever ends first stops the tax payment)
-          const taxPaymentDuration = Math.min(myTimeRemaining, neighborTimeRemaining);
-          totalTaxPaid += hourlyTaxPaid * taxPaymentDuration;
-        }
-      }
-    });
-  }
-
-  // Calculate net profit: total yield received minus total tax paid minus land purchase price
-  const netYield = totalYieldReceived - totalTaxPaid - myPriceESTRK;
-
-  return {
-    totalYield: netYield,
-    yieldPerHour: yieldPerHourReceived - yieldPerHourPaid,
-    taxPaidTotal: totalTaxPaid
-  };
 };
 
 // Performance optimized versions using caches
 export const getTaxRateCached = (level: string | undefined, locationNum: number, neighborCache: Map<number, number[]>): number => {
-  const neighbors = neighborCache.get(locationNum) || [];
-  const numCardinalNeighbors = neighbors.length;
+  return performanceCache.getTaxRate(level || 'zero', locationNum, () => {
+    const neighbors = neighborCache.get(locationNum) || [];
+    const numCardinalNeighbors = neighbors.length;
 
-  if (numCardinalNeighbors === 0) {
-    return 0;
-  }
-
-  const baseRate = (TAX_RATE_RAW / 100.0) * TIME_SPEED_FACTOR / numCardinalNeighbors;
-  
-  let discountedRate = baseRate;
-  if (level) {
-    switch (level.toLowerCase()) {
-      case 'first':
-        discountedRate = baseRate * 0.9;
-        break;
-      case 'second':
-        discountedRate = baseRate * 0.85;
-        break;
-      case 'zero':
-      default:
-        break;
+    if (numCardinalNeighbors === 0) {
+      return 0;
     }
-  }
-  return discountedRate;
+
+    const baseRate = (TAX_RATE_RAW / 100.0) * TIME_SPEED_FACTOR / numCardinalNeighbors;
+    
+    let discountedRate = baseRate;
+    if (level) {
+      switch (level.toLowerCase()) {
+        case 'first':
+          discountedRate = baseRate * 0.9;
+          break;
+        case 'second':
+          discountedRate = baseRate * 0.85;
+          break;
+        case 'zero':
+        default:
+          break;
+      }
+    }
+    return discountedRate;
+  });
 };
 
 export const calculateTaxInfoCached = (
@@ -315,42 +239,26 @@ export const calculateTotalYieldInfoCached = (
     return { totalYield: 0, yieldPerHour: 0, taxPaidTotal: 0 };
   }
 
-  const neighbors = neighborCache.get(location) || [];
   const { symbol: mySymbol, ratio: myRatio } = getTokenInfoCached(currentLand.token_used, tokenCache);
-
   const myPriceESTRK = convertToESTRK(currentLand.sell_price, mySymbol, myRatio);
-  
-  console.log(myPriceESTRK);
-
-  let totalYieldReceived = 0;
-  let yieldPerHourReceived = 0;
-  let totalTaxPaid = 0;
-  let yieldPerHourPaid = 0;
-
   const myBurnRate = calculateBurnRate(currentLand, lands, activeAuctions);
   const myTimeRemaining = calculateTimeRemainingHours(currentLand, myBurnRate);
 
-  neighbors.forEach(neighborLoc => {
-    const neighbor = lands[neighborLoc];
-    if (neighbor && !activeAuctions[neighborLoc] && neighbor.owner && neighbor.sell_price) {
-      const neighborBurnRate = calculateBurnRate(neighbor, lands, activeAuctions);
-      const neighborTimeRemaining = calculateTimeRemainingHours(neighbor, neighborBurnRate);
-      
-      if (neighborTimeRemaining > 0) {
-        const { symbol: neighborSymbol, ratio: neighborRatio } = getTokenInfoCached(neighbor.token_used, tokenCache);
-        const neighborPriceESTRK = convertToESTRK(neighbor.sell_price, neighborSymbol, neighborRatio);
-        const neighborTaxRate = getTaxRateCached(neighbor.level, Number(neighbor.location), neighborCache);
-        const neighborHourlyTax = neighborPriceESTRK * neighborTaxRate;
-        
-        yieldPerHourReceived += neighborHourlyTax;
-        const taxReceivingDuration = Math.min(myTimeRemaining, neighborTimeRemaining);
-        totalYieldReceived += neighborHourlyTax * taxReceivingDuration;
-      }
-    }
-  });
+  // Calculate yield received from neighbors (constrained by our duration)
+  const neighborYields = calculateNeighborYields(
+    location, lands, tokenCache, neighborCache, activeAuctions, 
+    true, // constrainToMyDuration = true
+    myTimeRemaining,
+    12 // Use default 12h cap for existing calculations
+  );
 
+  // Calculate tax paid to neighbors
+  let totalTaxPaid = 0;
+  let yieldPerHourPaid = 0;
+  
   if (currentLand.sell_price) {
     const myTaxRate = getTaxRateCached(currentLand.level, Number(currentLand.location), neighborCache);
+    const neighbors = neighborCache.get(location) || [];
     
     neighbors.forEach(neighborLoc => {
       const neighbor = lands[neighborLoc];
@@ -367,14 +275,305 @@ export const calculateTotalYieldInfoCached = (
       }
     });
   }
-  console.log(totalYieldReceived);
-  console.log(totalTaxPaid);
-  console.log(myPriceESTRK);
-  const netYield = totalYieldReceived - totalTaxPaid - myPriceESTRK;
+
+  const netYield = neighborYields.totalYield - totalTaxPaid - myPriceESTRK;
 
   return {
     totalYield: netYield,
-    yieldPerHour: yieldPerHourReceived - yieldPerHourPaid,
+    yieldPerHour: neighborYields.yieldPerHour - yieldPerHourPaid,
     taxPaidTotal: totalTaxPaid
   };
+};
+
+// Refactored function to calculate neighbor yields with optional constraints
+export const calculateNeighborYields = (
+  location: number,
+  lands: (PonziLand | null)[],
+  tokenCache: Map<string, { symbol: string; ratio: number | null }>,
+  neighborCache: Map<number, number[]>,
+  activeAuctions: Record<number, PonziLandAuction>,
+  constrainToMyDuration: boolean = true,
+  myTimeRemaining?: number,
+  durationCapHours: number = 12
+): { 
+  yieldPerHour: number; 
+  totalYield: number; 
+  longestNeighborDuration: number;
+  neighborDetails: Array<{
+    location: number;
+    priceESTRK: number;
+    taxRate: number;
+    hourlyYield: number;
+    timeRemaining: number;
+    totalYieldFromThisNeighbor: number;
+    symbol: string;
+  }>;
+} => {
+  return performanceCache.getNeighborYield(
+    location, 
+    constrainToMyDuration, 
+    myTimeRemaining, 
+    durationCapHours,
+    () => {
+      const neighbors = neighborCache.get(location) || [];
+      let yieldPerHour = 0;
+      let longestNeighborDuration = 0;
+      let totalYield = 0;
+  const neighborDetails = [] as Array<{
+    location: number;
+    priceESTRK: number;
+    taxRate: number;
+    hourlyYield: number;
+    timeRemaining: number;
+    totalYieldFromThisNeighbor: number;
+    symbol: string;
+  }>;
+
+  neighbors.forEach(neighborLoc => {
+    const neighbor = lands[neighborLoc];
+    if (neighbor && !activeAuctions[neighborLoc] && neighbor.owner && neighbor.sell_price) {
+      const neighborBurnRate = calculateBurnRate(neighbor, lands, activeAuctions);
+      const neighborTimeRemaining = calculateTimeRemainingHours(neighbor, neighborBurnRate);
+      
+      if (neighborTimeRemaining > 0) {
+        const { symbol: neighborSymbol, ratio: neighborRatio } = getTokenInfoCached(neighbor.token_used, tokenCache);
+        const neighborPriceESTRK = convertToESTRK(neighbor.sell_price, neighborSymbol, neighborRatio);
+        const neighborTaxRate = getTaxRateCached(neighbor.level, Number(neighbor.location), neighborCache);
+        const neighborHourlyTax = neighborPriceESTRK * neighborTaxRate;
+        
+        // Calculate yield duration - either constrained by our duration or until neighbor gets nuked
+        const yieldDuration = constrainToMyDuration && myTimeRemaining !== undefined
+          ? Math.min(myTimeRemaining, neighborTimeRemaining, durationCapHours)
+          : Math.min(neighborTimeRemaining, durationCapHours);
+        
+        const totalYieldFromThisNeighbor = neighborHourlyTax * yieldDuration;
+
+        yieldPerHour += neighborHourlyTax;
+        longestNeighborDuration = Math.max(longestNeighborDuration, neighborTimeRemaining);
+        totalYield += totalYieldFromThisNeighbor;
+        
+        neighborDetails.push({
+          location: neighborLoc,
+          priceESTRK: neighborPriceESTRK,
+          taxRate: neighborTaxRate,
+          hourlyYield: neighborHourlyTax,
+          timeRemaining: neighborTimeRemaining,
+          totalYieldFromThisNeighbor,
+          symbol: neighborSymbol
+        });
+      }
+    }
+  });
+
+  return {
+    yieldPerHour,
+    totalYield,
+    longestNeighborDuration,
+    neighborDetails
+  };
+  });
+};
+
+// Calculate comprehensive purchase recommendations
+export const calculatePurchaseRecommendation = (
+  location: number,
+  currentLand: PonziLand | null,
+  lands: (PonziLand | null)[],
+  tokenCache: Map<string, { symbol: string; ratio: number | null }>,
+  neighborCache: Map<number, number[]>,
+  activeAuctions: Record<number, PonziLandAuction>,
+  currentAuctionPrice?: number,
+  durationCapHours: number = 12
+): {
+  currentPrice: number;
+  maxYield: number;
+  recommendedPrice: number;
+  requiredTaxPerHour: number;
+  requiredTotalTax: number;
+  requiredStakeForFullYield: number;
+  yieldDuration: number;
+  neighborCount: number;
+  isRecommended: boolean;
+  recommendationReason: string;
+  profitMargin: number;
+  symbol: string;
+  neighborDetails: Array<{
+    location: number;
+    priceESTRK: number;
+    hourlyYield: number;
+    timeRemaining: number;
+    symbol: string;
+  }>;
+} => {
+  if (!currentLand) {
+    return {
+      currentPrice: 0,
+      maxYield: 0,
+      recommendedPrice: 0,
+      requiredTaxPerHour: 0,
+      requiredTotalTax: 0,
+      requiredStakeForFullYield: 0,
+      yieldDuration: 0,
+      neighborCount: 0,
+      isRecommended: false,
+      recommendationReason: 'Empty land',
+      profitMargin: 0,
+      symbol: 'nftSTRK',
+      neighborDetails: [] as Array<{
+        location: number;
+        priceESTRK: number;
+        hourlyYield: number;
+        timeRemaining: number;
+        totalYieldFromThisNeighbor: number;
+        symbol: string;
+      }>
+    };
+  }
+
+  return performanceCache.getPurchaseRecommendation(
+    location,
+    currentAuctionPrice,
+    durationCapHours,
+    () => {
+      const { symbol, ratio } = getTokenInfoCached(currentLand.token_used, tokenCache);
+  
+  // Get current price (either auction price or sell price)
+  const currentPrice = currentAuctionPrice || convertToESTRK(currentLand.sell_price, symbol, ratio);
+
+  // Calculate maximum yield from neighbors (not constrained by our duration)
+  const neighborYields = calculateNeighborYields(
+    location, lands, tokenCache, neighborCache, activeAuctions, 
+    false, // constrainToMyDuration = false - get full neighbor yields
+    undefined,
+    durationCapHours
+  );
+  
+  if (neighborYields.totalYield <= 0) {
+    return {
+      currentPrice,
+      maxYield: 0,
+      recommendedPrice: currentPrice,
+      requiredTaxPerHour: 0,
+      requiredTotalTax: 0,
+      requiredStakeForFullYield: 0,
+      yieldDuration: 0,
+      neighborCount: 0,
+      isRecommended: false,
+      recommendationReason: 'No profitable neighbors',
+      profitMargin: 0,
+      symbol,
+      neighborDetails: [] as Array<{
+        location: number;
+        priceESTRK: number;
+        hourlyYield: number;
+        timeRemaining: number;
+        totalYieldFromThisNeighbor: number;
+        symbol: string;
+      }>
+    };
+  }
+
+  // Calculate tax rate for this location (assume level zero for conservative estimate)
+  const myTaxRate = getTaxRateCached('zero', location, neighborCache);
+  const neighbors = neighborCache.get(location) || [];
+  
+  // Count neighbors that will receive tax from us
+  let taxPayingNeighborCount = 0;
+  neighbors.forEach(neighborLoc => {
+    const neighbor = lands[neighborLoc];
+    if (neighbor && !activeAuctions[neighborLoc] && neighbor.owner) {
+      taxPayingNeighborCount++;
+    }
+  });
+
+  // Calculate recommended price using conservative 2-hour strategy
+  // yield_first_2h = guaranteed yield in first 2 hours
+  // remaining_yield = risky longer-term yield
+  let yield_first_2h = 0;
+  neighborYields.neighborDetails.forEach(neighbor => {
+    const safeYieldDuration = Math.min(2, neighbor.timeRemaining);
+    yield_first_2h += neighbor.hourlyYield * safeYieldDuration;
+  });
+  
+  const remaining_yield = neighborYields.totalYield - yield_first_2h;
+  const recommendedPrice = currentPrice + (yield_first_2h * 0.8) + (remaining_yield * 0.2);
+
+  // Calculate required tax payments - accounting for when each neighbor gets nuked
+  const requiredTaxPerHour = recommendedPrice * myTaxRate;
+  let requiredTotalTax = 0;
+  
+  // Calculate tax paid to each neighbor until they get nuked
+  neighbors.forEach(neighborLoc => {
+    const neighbor = lands[neighborLoc];
+    if (neighbor && !activeAuctions[neighborLoc] && neighbor.owner) {
+      const neighborBurnRate = calculateBurnRate(neighbor, lands, activeAuctions);
+      const neighborTimeRemaining = calculateTimeRemainingHours(neighbor, neighborBurnRate);
+      
+      if (neighborTimeRemaining > 0) {
+        // We pay tax to this neighbor until either they get nuked or we reach our duration cap
+        const taxPaymentDuration = Math.min(durationCapHours, neighborTimeRemaining);
+        requiredTotalTax += requiredTaxPerHour * taxPaymentDuration;
+      }
+    }
+  });
+  
+  // Calculate required stake in nftSTRK (always display in nftSTRK for consistency)
+  const requiredStakeForFullYield = requiredTotalTax;
+
+  // Calculate profit margin
+  const grossProfit = neighborYields.totalYield;
+  const netProfit = grossProfit - requiredTotalTax;
+  const profitMargin = currentPrice > 0 ? (netProfit / currentPrice) * 100 : 0;
+
+  // Determine recommendation
+  let isRecommended = false;
+  let recommendationReason = '';
+
+  if (location === 2462) {
+    console.log({ location, neighborYields, currentPrice, recommendedPrice, requiredTaxPerHour, requiredTotalTax, requiredStakeForFullYield, yieldDuration: neighborYields.longestNeighborDuration, neighborCount: neighborYields.neighborDetails.length, isRecommended, recommendationReason, profitMargin, symbol, neighborDetails: neighborYields.neighborDetails });
+  }
+  if (neighborYields.yieldPerHour <= 0) {
+    recommendationReason = 'No yield potential';
+  } else if (netProfit <= currentPrice * 0.02) {
+    recommendationReason = 'Low profitability';
+  } else {
+    isRecommended = true;
+    recommendationReason = 'Profitable';
+  }
+
+  return {
+    currentPrice,
+    maxYield: neighborYields.totalYield,
+    recommendedPrice,
+    requiredTaxPerHour,
+    requiredTotalTax,
+    requiredStakeForFullYield,
+    yieldDuration: neighborYields.longestNeighborDuration,
+    neighborCount: neighborYields.neighborDetails.length,
+    isRecommended,
+    recommendationReason,
+    profitMargin,
+    symbol,
+    neighborDetails: neighborYields.neighborDetails.map((n: any) => {
+      // Ensure all required properties exist
+      const result = {
+        location: n.location,
+        priceESTRK: n.priceESTRK,
+        hourlyYield: n.hourlyYield,
+        timeRemaining: n.timeRemaining,
+        totalYieldFromThisNeighbor: n.totalYieldFromThisNeighbor || 0,
+        symbol: n.symbol
+      };
+      return result;
+    }) as Array<{
+      location: number;
+      priceESTRK: number;
+      hourlyYield: number;
+      timeRemaining: number;
+      totalYieldFromThisNeighbor: number;
+      symbol: string;
+    }>
+      };
+    }
+  );
 }; 

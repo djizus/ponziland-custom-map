@@ -36,8 +36,12 @@ import {
   isNukable, 
   calculateTotalYieldInfoCached,
   calculateTimeRemainingHours,
-  getTaxRateCached 
+  getTaxRateCached,
+  calculatePurchaseRecommendation 
 } from '../utils/taxCalculations';
+
+import { performanceCache } from '../utils/performanceCache';
+import { comparePricesArrays, compareLandArrays } from '../utils/smartDiff';
 
 import { 
   calculateAuctionPrice, 
@@ -69,6 +73,186 @@ import {
   AuctionElapsedInfo
 } from './PonzilandMap/styles/TileStyles';
 
+// Custom hook for expensive auction calculations
+const useAuctionCalculations = (
+  auction: PonziLandAuction | null,
+  land: PonziLand | null,
+  location: number,
+  neighborCache: Map<number, number[]>,
+  gridData: any,
+  activeAuctions: Record<number, PonziLandAuction>,
+  tokenInfoCache: Map<string, { symbol: string; ratio: number | null }>
+) => {
+  return useMemo(() => {
+    if (!auction || !land) {
+      return {
+        auctionYieldInfo: undefined,
+        auctionROIForDetails: undefined,
+        currentAuctionPriceForTileDisplay: undefined,
+        potentialYieldAuction: undefined
+      };
+    }
+
+    const currentAuctionPriceForTileDisplay = calculateAuctionPrice(auction);
+    const auctionPriceESTRK = currentAuctionPriceForTileDisplay;
+    const neighbors = neighborCache.get(location) || [];
+    
+    // Calculate potential yield for auction
+    let potentialYieldAuction = 0;
+    neighbors.forEach(neighborLoc => {
+      const neighbor = gridData.tiles[neighborLoc];
+      if (neighbor && !activeAuctions[neighborLoc] && neighbor.owner && neighbor.sell_price) {
+        const { symbol, ratio } = getTokenInfoCached(neighbor.token_used, tokenInfoCache);
+        const neighborPriceESTRK = convertToESTRK(neighbor.sell_price, symbol, ratio);
+        const neighborTaxRate = getTaxRateCached(neighbor.level, Number(neighbor.location), neighborCache);
+        potentialYieldAuction += neighborPriceESTRK * neighborTaxRate;
+      }
+    });
+    
+    // Calculate auction tax received
+    let auctionTaxReceived = 0;
+    neighbors.forEach(neighborLoc => {
+      const neighbor = gridData.tiles[neighborLoc];
+      if (neighbor && !activeAuctions[neighborLoc] && neighbor.owner && neighbor.sell_price) {
+        const { symbol, ratio } = getTokenInfoCached(neighbor.token_used, tokenInfoCache);
+        const neighborPriceESTRK = convertToESTRK(neighbor.sell_price, symbol, ratio);
+        const neighborTaxRate = getTaxRateCached(neighbor.level, Number(neighbor.location), neighborCache);
+        auctionTaxReceived += neighborPriceESTRK * neighborTaxRate;
+      }
+    });
+    
+    const myTaxRate = getTaxRateCached(land.level, location, neighborCache);
+    let auctionTaxPaid = 0;
+    
+    neighbors.forEach(neighborLoc => {
+      const neighbor = gridData.tiles[neighborLoc];
+      if (neighbor && !activeAuctions[neighborLoc] && neighbor.owner) {
+        auctionTaxPaid += auctionPriceESTRK * myTaxRate;
+      }
+    });
+    
+    const auctionYieldPerHour = auctionTaxReceived - auctionTaxPaid;
+    
+    // Calculate time-based yield
+    let longestNeighborDuration = 0;
+    neighbors.forEach(neighborLoc => {
+      const neighbor = gridData.tiles[neighborLoc];
+      if (neighbor && !activeAuctions[neighborLoc] && neighbor.owner) {
+        const neighborBurnRate = calculateBurnRate(neighbor, gridData.tiles, activeAuctions);
+        const neighborTimeRemaining = calculateTimeRemainingHours(neighbor, neighborBurnRate);
+        longestNeighborDuration = Math.max(longestNeighborDuration, neighborTimeRemaining);
+      }
+    });
+    
+    const myTimeRemaining = Math.max(longestNeighborDuration, 48);
+    let totalYieldReceived = 0;
+    let totalTaxPaid = 0;
+    
+    neighbors.forEach(neighborLoc => {
+      const neighbor = gridData.tiles[neighborLoc];
+      if (neighbor && !activeAuctions[neighborLoc] && neighbor.owner && neighbor.sell_price) {
+        const neighborBurnRate = calculateBurnRate(neighbor, gridData.tiles, activeAuctions);
+        const neighborTimeRemaining = calculateTimeRemainingHours(neighbor, neighborBurnRate);
+        
+        if (neighborTimeRemaining > 0) {
+          const { symbol: neighborSymbol, ratio: neighborRatio } = getTokenInfoCached(neighbor.token_used, tokenInfoCache);
+          const neighborPriceESTRK = convertToESTRK(neighbor.sell_price, neighborSymbol, neighborRatio);
+          const neighborTaxRate = getTaxRateCached(neighbor.level, Number(neighbor.location), neighborCache);
+          const neighborHourlyTax = neighborPriceESTRK * neighborTaxRate;
+          
+          const taxReceivingDuration = Math.min(myTimeRemaining, neighborTimeRemaining);
+          totalYieldReceived += neighborHourlyTax * taxReceivingDuration;
+          
+          const hourlyTaxPaid = auctionPriceESTRK * myTaxRate;
+          const taxPaymentDuration = Math.min(myTimeRemaining, neighborTimeRemaining);
+          totalTaxPaid += hourlyTaxPaid * taxPaymentDuration;
+        }
+      }
+    });
+    
+    const netYield = totalYieldReceived - totalTaxPaid - auctionPriceESTRK;
+    
+    const auctionYieldInfo: YieldInfo = {
+      totalYield: netYield,
+      yieldPerHour: auctionYieldPerHour,
+      taxPaidTotal: totalTaxPaid
+    };
+    
+    const auctionROIForDetails = auctionPriceESTRK > 0 ? (auctionYieldPerHour / auctionPriceESTRK) * 100 : undefined;
+    
+    return {
+      auctionYieldInfo,
+      auctionROIForDetails,
+      currentAuctionPriceForTileDisplay,
+      potentialYieldAuction
+    };
+  }, [auction, land, location, neighborCache, gridData.tiles, activeAuctions, tokenInfoCache]);
+};
+
+// Memoized sidebar components for performance
+const SidebarHeader = memo(({ isSidebarCollapsed, onToggle }: { 
+  isSidebarCollapsed: boolean; 
+  onToggle: () => void; 
+}) => (
+  <div style={{
+    padding: '12px',
+    borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between'
+  }}>
+    {!isSidebarCollapsed && <span style={{ fontWeight: 'bold', fontSize: '14px' }}>Ponziland Analysis</span>}
+    <button 
+      onClick={onToggle}
+      style={{
+        background: 'transparent',
+        border: 'none',
+        color: 'white',
+        cursor: 'pointer',
+        fontSize: '16px',
+        padding: '4px'
+      }}
+    >
+      {isSidebarCollapsed ? '▶' : '◀'}
+    </button>
+  </div>
+));
+
+const TabNavigation = memo(({ activeTab, onTabChange }: {
+  activeTab: 'map' | 'analysis';
+  onTabChange: (tab: 'map' | 'analysis') => void;
+}) => (
+  <div style={{
+    display: 'flex',
+    borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
+    background: 'rgba(0, 0, 0, 0.2)'
+  }}>
+    {[
+      { key: 'map', label: '🗺️', title: 'Map & Data' },
+      { key: 'analysis', label: '📊', title: 'Analysis & Details' }
+    ].map(tab => (
+      <button
+        key={tab.key}
+        onClick={() => onTabChange(tab.key as any)}
+        style={{
+          flex: 1,
+          padding: '8px 4px',
+          background: activeTab === tab.key ? 'rgba(255, 255, 255, 0.1)' : 'transparent',
+          border: 'none',
+          color: 'white',
+          cursor: 'pointer',
+          fontSize: '12px',
+          transition: 'background 0.2s'
+        }}
+        title={tab.title}
+      >
+        {tab.label}
+      </button>
+    ))}
+  </div>
+));
+
+
 // Memoized Tile Component for performance optimization
 interface TileComponentProps {
   row: number;
@@ -83,14 +267,20 @@ interface TileComponentProps {
   activeAuctions: Record<number, PonziLandAuction>;
   selectedLayer: 'purchasing' | 'yield';
   hideNotRecommended: boolean;
+  durationCapHours: number;
   onTileClick: (tileDetails: SelectedTileDetails) => void;
 }
 
 const TileComponent = memo(({ 
   row, col, location, land, auction, isHighlighted, tokenInfoCache, neighborCache, 
-  gridData, activeAuctions, selectedLayer, hideNotRecommended, onTileClick 
+  gridData, activeAuctions, selectedLayer, hideNotRecommended, durationCapHours, onTileClick 
 }: TileComponentProps) => {
-  // All the tile calculation logic moved here with memoization
+  // Use custom hook for expensive auction calculations
+  const auctionCalculations = useAuctionCalculations(
+    auction, land, location, neighborCache, gridData, activeAuctions, tokenInfoCache
+  );
+
+  // Simplified tile calculation logic with auction calculations extracted
   const tileData = useMemo(() => {
     const { symbol, ratio } = getTokenInfoCached(land?.token_used || '', tokenInfoCache);
     
@@ -99,167 +289,54 @@ const TileComponent = memo(({
     const landPriceESTRK = land ? convertToESTRK(land.sell_price, symbol, ratio) : 0;
     const burnRate = land ? calculateBurnRate(land, gridData.tiles, activeAuctions) : 0;
     const nukableStatus = land ? isNukable(land, burnRate) : false;
-    // Calculate potential yield for auction manually using cached data
-    let potentialYieldAuction: number | undefined = undefined;
-    if (auction && land) {
-      const neighbors = neighborCache.get(location) || [];
-      let yield_ = 0;
-      neighbors.forEach(neighborLoc => {
-        const neighbor = gridData.tiles[neighborLoc];
-        if (neighbor && !activeAuctions[neighborLoc] && neighbor.owner && neighbor.sell_price) {
-          const { symbol, ratio } = getTokenInfoCached(neighbor.token_used, tokenInfoCache);
-          const neighborPriceESTRK = convertToESTRK(neighbor.sell_price, symbol, ratio);
-          const neighborTaxRate = getTaxRateCached(neighbor.level, Number(neighbor.location), neighborCache);
-          yield_ += neighborPriceESTRK * neighborTaxRate;
-        }
-      });
-      potentialYieldAuction = yield_;
-    }
 
-    // Calculate auction-specific yield info (keeping the complex logic here for now)
-    let auctionYieldInfo: YieldInfo | undefined = undefined;
-    let auctionROIForDetails: number | undefined = undefined;
-    let currentAuctionPriceForTileDisplay: number | undefined = undefined;
+    // Use auction calculations from hook
+    const { auctionYieldInfo, auctionROIForDetails, currentAuctionPriceForTileDisplay, potentialYieldAuction } = auctionCalculations;
 
-    if (auction && land) {
-      currentAuctionPriceForTileDisplay = calculateAuctionPrice(auction);
-      const auctionPriceESTRK = currentAuctionPriceForTileDisplay;
-      
-      const neighbors = neighborCache.get(location) || [];
-      
-      // Calculate auction tax received manually using cached data
-      let auctionTaxReceived = 0;
-      neighbors.forEach(neighborLoc => {
-        const neighbor = gridData.tiles[neighborLoc];
-        if (neighbor && !activeAuctions[neighborLoc] && neighbor.owner && neighbor.sell_price) {
-          const { symbol, ratio } = getTokenInfoCached(neighbor.token_used, tokenInfoCache);
-          const neighborPriceESTRK = convertToESTRK(neighbor.sell_price, symbol, ratio);
-          const neighborTaxRate = getTaxRateCached(neighbor.level, Number(neighbor.location), neighborCache);
-          auctionTaxReceived += neighborPriceESTRK * neighborTaxRate;
-        }
-      });
-      const myTaxRate = getTaxRateCached(land.level, location, neighborCache);
-      let auctionTaxPaid = 0;
-      
-      neighbors.forEach(neighborLoc => {
-        const neighbor = gridData.tiles[neighborLoc];
-        if (neighbor && !activeAuctions[neighborLoc] && neighbor.owner) {
-          auctionTaxPaid += auctionPriceESTRK * myTaxRate;
-        }
-      });
-      
-      const auctionYieldPerHour = auctionTaxReceived - auctionTaxPaid;
-      
-      let longestNeighborDuration = 0;
-      neighbors.forEach(neighborLoc => {
-        const neighbor = gridData.tiles[neighborLoc];
-        if (neighbor && !activeAuctions[neighborLoc] && neighbor.owner) {
-          const neighborBurnRate = calculateBurnRate(neighbor, gridData.tiles, activeAuctions);
-          const neighborTimeRemaining = calculateTimeRemainingHours(neighbor, neighborBurnRate);
-          longestNeighborDuration = Math.max(longestNeighborDuration, neighborTimeRemaining);
-        }
-      });
-      
-      const myTimeRemaining = Math.max(longestNeighborDuration, 48);
-      let totalYieldReceived = 0;
-      let totalTaxPaid = 0;
-      
-      neighbors.forEach(neighborLoc => {
-        const neighbor = gridData.tiles[neighborLoc];
-        if (neighbor && !activeAuctions[neighborLoc] && neighbor.owner && neighbor.sell_price) {
-          const neighborBurnRate = calculateBurnRate(neighbor, gridData.tiles, activeAuctions);
-          const neighborTimeRemaining = calculateTimeRemainingHours(neighbor, neighborBurnRate);
-          
-          if (neighborTimeRemaining > 0) {
-            const { symbol: neighborSymbol, ratio: neighborRatio } = getTokenInfoCached(neighbor.token_used, tokenInfoCache);
-            const neighborPriceESTRK = convertToESTRK(neighbor.sell_price, neighborSymbol, neighborRatio);
-            const neighborTaxRate = getTaxRateCached(neighbor.level, Number(neighbor.location), neighborCache);
-            const neighborHourlyTax = neighborPriceESTRK * neighborTaxRate;
-            
-            const taxReceivingDuration = Math.min(myTimeRemaining, neighborTimeRemaining);
-            totalYieldReceived += neighborHourlyTax * taxReceivingDuration;
-            
-            const hourlyTaxPaid = auctionPriceESTRK * myTaxRate;
-            const taxPaymentDuration = Math.min(myTimeRemaining, neighborTimeRemaining);
-            totalTaxPaid += hourlyTaxPaid * taxPaymentDuration;
-          }
-        }
-      });
-      
-      const netYield = totalYieldReceived - totalTaxPaid - auctionPriceESTRK;
-      
-      auctionYieldInfo = {
-        totalYield: netYield,
-        yieldPerHour: auctionYieldPerHour,
-        taxPaidTotal: totalTaxPaid
-      };
-      
-      if (auctionPriceESTRK > 0) {
-        auctionROIForDetails = (auctionYieldPerHour / auctionPriceESTRK) * 100;
-      }
-    }
+    // Calculate comprehensive purchase recommendation using new system
+    const purchaseRecommendation = calculatePurchaseRecommendation(
+      location,
+      land,
+      gridData.tiles,
+      tokenInfoCache,
+      neighborCache,
+      activeAuctions,
+      auction ? currentAuctionPriceForTileDisplay : undefined,
+      durationCapHours
+    );
 
     // Calculate display yield and colors based on selected layer
     let displayYield = 0;
     let effectivePrice = landPriceESTRK;
-    let isRecommendedForPurchase = false;
-    let recommendationMessage = '';
+    let isRecommendedForPurchase = purchaseRecommendation.isRecommended;
+    let recommendationMessage = purchaseRecommendation.recommendationReason;
+    
+    // Calculate net profit for purchasing layer
+    const netProfit = purchaseRecommendation.maxYield - purchaseRecommendation.requiredTotalTax;
     
     if (auction && auctionYieldInfo) {
       effectivePrice = currentAuctionPriceForTileDisplay || 0;
       if (selectedLayer === 'yield') {
-        // Check if recommended for purchase (this is the purchasing layer)
-        const yieldPerHour = auctionYieldInfo.yieldPerHour;
-        const totalExpectedProfit = auctionYieldInfo.totalYield;
-        
-        if (yieldPerHour <= 0) {
-          isRecommendedForPurchase = false;
-          recommendationMessage = 'Negative yield';
-        } else if (totalExpectedProfit <= effectivePrice * 0.1) {
-          // Require at least 10% profit relative to purchase price
-          isRecommendedForPurchase = false;
-          recommendationMessage = 'Low profitability';
-        } else {
-          isRecommendedForPurchase = true;
-        }
-        
-        // Purchasing layer: Expected profit or recommendation message
-        displayYield = auctionYieldInfo.totalYield;
+        // Purchasing layer: Show net profit
+        displayYield = netProfit;
       } else {
-        // Yield analysis layer: Total yield + purchase price
+        // Analysis layer: Total yield + purchase price
         displayYield = auctionYieldInfo.totalYield + effectivePrice;
       }
     } else {
       if (selectedLayer === 'yield') {
-        // Check if recommended for purchase (this is the purchasing layer)
-        const yieldPerHour = yieldInfo.yieldPerHour;
-        const totalExpectedProfit = yieldInfo.totalYield;
-        
-        if (yieldPerHour <= 0) {
-          isRecommendedForPurchase = false;
-          recommendationMessage = 'Negative yield';
-        } else if (totalExpectedProfit <= effectivePrice * 0.1) {
-          // Require at least 10% profit relative to purchase price
-          isRecommendedForPurchase = false;
-          recommendationMessage = 'Low profitability';
-        } else {
-          isRecommendedForPurchase = true;
-        }
-        
-        // Purchasing layer: Expected profit or recommendation message
-        displayYield = yieldInfo.totalYield;
+        // Purchasing layer: Show net profit
+        displayYield = netProfit;
       } else {
-        // Yield analysis layer: Total yield + purchase price
+        // Analysis layer: Total yield + purchase price
         displayYield = yieldInfo.totalYield + landPriceESTRK;
       }
     }
       
-    // For purchasing layer, use expected profit for color (or gray for not recommended)
+    // For purchasing layer, use net profit for color (or gray for not recommended)
     // For yield analysis layer, use yieldPerHour for color
     const colorValue = selectedLayer === 'yield' ? 
-      (isRecommendedForPurchase ? 
-        (auction && auctionYieldInfo ? auctionYieldInfo.totalYield : yieldInfo.totalYield) : 
-        -1) : // -1 will make it gray
+      (isRecommendedForPurchase ? netProfit : -1) : // -1 will make it gray
       (auction && auctionYieldInfo ? auctionYieldInfo.yieldPerHour : yieldInfo.yieldPerHour);
     
     const valueColor = land ? getValueColor(
@@ -273,11 +350,12 @@ const TileComponent = memo(({
       symbol, ratio, taxInfo, yieldInfo, auctionYieldInfo, landPriceESTRK, 
       burnRate, nukableStatus, potentialYieldAuction, auctionROIForDetails,
       currentAuctionPriceForTileDisplay, displayYield, effectivePrice, 
-      valueColor, opportunityColor, isRecommendedForPurchase, recommendationMessage
+      valueColor, opportunityColor, isRecommendedForPurchase, recommendationMessage,
+      purchaseRecommendation, netProfit
     };
-  }, [location, land, auction, tokenInfoCache, neighborCache, gridData.tiles, activeAuctions, selectedLayer]);
+  }, [location, land, auction, tokenInfoCache, neighborCache, gridData.tiles, activeAuctions, selectedLayer, auctionCalculations, durationCapHours]);
 
-  const currentTileDetails: SelectedTileDetails = useMemo(() => ({
+  const currentTileDetails = useMemo((): SelectedTileDetails => ({
     location,
     coords: displayCoordinates(col, row),
     land,
@@ -294,7 +372,8 @@ const TileComponent = memo(({
     burnRate: tileData.burnRate,
     nukableStatus: tileData.nukableStatus,
     potentialYieldAuction: tileData.potentialYieldAuction,
-    auctionROI: tileData.auctionROIForDetails
+    auctionROI: tileData.auctionROIForDetails,
+    purchaseRecommendation: tileData.purchaseRecommendation
   }), [location, col, row, land, auction, tileData, isHighlighted]);
 
   const handleClick = useCallback(() => {
@@ -318,9 +397,7 @@ const TileComponent = memo(({
       $isAuction={!!auction && !shouldShowAsEmpty}
       $opportunityColor={shouldShowAsEmpty ? '#333' : tileData.opportunityColor}
       $isNukable={shouldShowAsEmpty ? false : tileData.nukableStatus}
-      $auctionYield={auction && tileData.auctionYieldInfo && !shouldShowAsEmpty ? 
-        tileData.displayYield : 
-        tileData.potentialYieldAuction}
+      $pulseGlowIntensity={0}
     >
       <TileLocation>{displayCoordinates(col, row)}</TileLocation>
       {land && !shouldShowAsEmpty && (
@@ -328,13 +405,16 @@ const TileComponent = memo(({
           <>
             <TileLevel>L{getLevelNumber(land.level)}</TileLevel>
             <TileHeader>
-              {tileData.auctionYieldInfo ? 
-                (selectedLayer === 'yield' && !tileData.isRecommendedForPurchase ? 
-                  tileData.recommendationMessage :
-                  `${tileData.displayYield > 0 ? '+' : ''}${tileData.displayYield.toFixed(1)}`
-                ) :
+              {selectedLayer === 'yield' ? (
+                tileData.auctionYieldInfo ? 
+                  (!tileData.isRecommendedForPurchase ? 
+                    tileData.recommendationMessage :
+                    `${tileData.displayYield > 0 ? '+' : ''}${tileData.displayYield.toFixed(1)}`
+                  ) :
+                  'AUCTION'
+              ) : (
                 'AUCTION'
-              }
+              )}
             </TileHeader>
             <CompactTaxInfo>
               <div>{tileData.currentAuctionPriceForTileDisplay !== undefined ? tileData.currentAuctionPriceForTileDisplay.toFixed(1) : 'N/A'} nftSTRK</div>
@@ -453,6 +533,11 @@ const PonzilandMap = () => {
     () => loadPersistedState<boolean>('ponziland-hide-not-recommended', false)
   );
   
+  // Duration cap for yield collection and tax payment (2-24 hours)
+  const [durationCapHours, setDurationCapHours] = useState(
+    () => loadPersistedState<number>('ponziland-duration-cap', 12)
+  );
+  
 
   // Performance optimization: Create token info cache to avoid repeated lookups
   const tokenInfoCache = useMemo(() => {
@@ -479,10 +564,32 @@ const PonzilandMap = () => {
     return cache;
   }, [gridData.activeRows, gridData.activeCols]);
 
+  // Performance optimization: Pre-calculate all tile locations to avoid nested maps
+  const activeTileLocations = useMemo(() => {
+    const locations: Array<{ row: number; col: number; location: number }> = [];
+    gridData.activeRows.forEach(row => {
+      gridData.activeCols.forEach(col => {
+        locations.push({ row, col, location: row * GRID_SIZE + col });
+      });
+    });
+    return locations;
+  }, [gridData.activeRows, gridData.activeCols]);
+
   // Performance optimization: Memoize tile click handler
   const handleTileClick = useCallback((tileDetails: SelectedTileDetails) => {
     setSelectedTileData(tileDetails);
     setActiveTab('analysis');
+    // Always open the sidebar when a tile is clicked
+    setIsSidebarCollapsed(false);
+  }, []);
+
+  // Performance optimization: Memoize sidebar callbacks
+  const handleSidebarToggle = useCallback(() => {
+    setIsSidebarCollapsed(!isSidebarCollapsed);
+  }, [isSidebarCollapsed]);
+
+  const handleTabChange = useCallback((tab: 'map' | 'analysis') => {
+    setActiveTab(tab);
   }, []);
 
   useEffect(() => {
@@ -490,14 +597,22 @@ const PonzilandMap = () => {
       try {
         const response = await fetch('/api/price');
         const data = await response.json();
-        setPrices(data);
+        
+        // Only update if data has actually changed
+        setPrices(prevPrices => {
+          if (!comparePricesArrays(prevPrices, data)) {
+            performanceCache.updatePricesVersion();
+            return data;
+          }
+          return prevPrices;
+        });
       } catch (error) {
         console.error('Error fetching prices:', error);
       }
     };
 
     fetchPrices(); // Initial fetch
-    const interval = setInterval(fetchPrices, 5000); // Refresh every 5 seconds
+    const interval = setInterval(fetchPrices, 30000); // Reduced frequency: every 30 seconds
 
     return () => clearInterval(interval);
   }, []);
@@ -560,14 +675,23 @@ const PonzilandMap = () => {
     };
 
     fetchAllSqlData(true); // Initial fetch with loading indicator
-    const intervalId = setInterval(() => fetchAllSqlData(false), 5000); // Polls without full loading indicator
+    const intervalId = setInterval(() => fetchAllSqlData(false), 60000); // Reduced frequency: every 60 seconds
 
     return () => clearInterval(intervalId);
   }, []);
 
   useEffect(() => {
     if (landsSqlData && stakesSqlData && landsSqlData.length > 0) {
-      setGridData(processGridData(landsSqlData, stakesSqlData));
+      const newGridData = processGridData(landsSqlData, stakesSqlData);
+      // Only update if grid data has actually changed
+      setGridData(prevGridData => {
+        if (!compareLandArrays(prevGridData.tiles, newGridData.tiles)) {
+          performanceCache.updateLandsVersion();
+          performanceCache.updateStakesVersion();
+          return newGridData;
+        }
+        return prevGridData;
+      });
     } else if (!loadingSql && landsSqlData && landsSqlData.length === 0) {
        setGridData({ tiles: Array(GRID_SIZE * GRID_SIZE).fill(null), activeRows: [], activeCols: [] });
     }
@@ -582,6 +706,7 @@ const PonzilandMap = () => {
           return acc;
         }, {});
       setActiveAuctions(filteredAuctions);
+      performanceCache.updateAuctionsVersion();
     }
   }, [auctionsSqlData]);
 
@@ -610,6 +735,10 @@ const PonzilandMap = () => {
   useEffect(() => {
     localStorage.setItem('ponziland-active-tab', JSON.stringify(activeTab));
   }, [activeTab]);
+
+  useEffect(() => {
+    localStorage.setItem('ponziland-duration-cap', JSON.stringify(durationCapHours));
+  }, [durationCapHours]);
 
   useEffect(() => {
     if (gridData.tiles.length === 0 && !loadingSql) {
@@ -731,60 +860,18 @@ const PonzilandMap = () => {
         flexDirection: 'column'
       }}>
         {/* Sidebar Header */}
-        <div style={{
-          padding: '12px',
-          borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between'
-        }}>
-          {!isSidebarCollapsed && <span style={{ fontWeight: 'bold', fontSize: '14px' }}>Ponziland Analysis</span>}
-          <button 
-            onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
-            style={{
-              background: 'transparent',
-              border: 'none',
-              color: 'white',
-              cursor: 'pointer',
-              fontSize: '16px',
-              padding: '4px'
-            }}
-          >
-            {isSidebarCollapsed ? '▶' : '◀'}
-          </button>
-        </div>
+        <SidebarHeader 
+          isSidebarCollapsed={isSidebarCollapsed} 
+          onToggle={handleSidebarToggle}
+        />
 
         {!isSidebarCollapsed && (
           <>
             {/* Tab Navigation */}
-            <div style={{
-              display: 'flex',
-              borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
-              background: 'rgba(0, 0, 0, 0.2)'
-            }}>
-              {[
-                { key: 'map', label: '🗺️', title: 'Map & Data' },
-                { key: 'analysis', label: '📊', title: 'Analysis & Details' }
-              ].map(tab => (
-                <button
-                  key={tab.key}
-                  onClick={() => setActiveTab(tab.key as any)}
-                  style={{
-                    flex: 1,
-                    padding: '8px 4px',
-                    background: activeTab === tab.key ? 'rgba(255, 255, 255, 0.1)' : 'transparent',
-                    border: 'none',
-                    color: 'white',
-                    cursor: 'pointer',
-                    fontSize: '12px',
-                    transition: 'background 0.2s'
-                  }}
-                  title={tab.title}
-                >
-                  {tab.label}
-                </button>
-              ))}
-            </div>
+            <TabNavigation 
+              activeTab={activeTab}
+              onTabChange={handleTabChange}
+            />
 
             {/* Tab Content */}
             <div style={{
@@ -859,6 +946,44 @@ const PonzilandMap = () => {
                           Hide not recommended
                         </label>
                       )}
+
+                      {/* Duration Cap Slider */}
+                      <div style={{ marginTop: '12px' }}>
+                        <label style={{ 
+                          display: 'block', 
+                          fontSize: '11px', 
+                          color: '#bbb',
+                          marginBottom: '6px'
+                        }}>
+                          Max Holding Duration: {durationCapHours}h
+                        </label>
+                        <input
+                          type="range"
+                          min="2"
+                          max="24"
+                          step="1"
+                          value={durationCapHours}
+                          onChange={(e) => setDurationCapHours(Number(e.target.value))}
+                          style={{
+                            width: '100%',
+                            height: '4px',
+                            background: 'rgba(255, 255, 255, 0.2)',
+                            outline: 'none',
+                            borderRadius: '2px',
+                            cursor: 'pointer'
+                          }}
+                        />
+                        <div style={{ 
+                          display: 'flex', 
+                          justifyContent: 'space-between', 
+                          fontSize: '10px', 
+                          color: '#666',
+                          marginTop: '2px'
+                        }}>
+                          <span>2h</span>
+                          <span>24h</span>
+                        </div>
+                      </div>
                     </div>
                   </div>
 
@@ -977,142 +1102,50 @@ const PonzilandMap = () => {
                               <h4 style={{ margin: '0 0 8px 0', fontSize: '12px', color: '#ccc' }}>PURCHASE RECOMMENDATIONS</h4>
                               <div style={{ fontSize: '11px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
                                 {(() => {
-                                  // Determine if this is an auction or regular sale
-                                  const isAuction = !!selectedTileData.auction;
+                                  const recommendation = selectedTileData.purchaseRecommendation;
                                   
-                                  // Get the appropriate yield info and current price
-                                  const relevantYieldInfo = isAuction && selectedTileData.auctionYieldInfo 
-                                    ? selectedTileData.auctionYieldInfo 
-                                    : selectedTileData.yieldInfo;
-                                  
-                                  const currentPriceESTRK = isAuction && selectedTileData.auction
-                                    ? calculateAuctionPrice(selectedTileData.auction)
-                                    : selectedTileData.landPriceESTRK;
-                                  
-                                  const currentBurnRate = isAuction 
-                                    ? (selectedTileData.auctionYieldInfo?.taxPaidTotal || 0) / Math.max(1, selectedTileData.auctionYieldInfo?.yieldPerHour || 1)
-                                    : selectedTileData.burnRate;
-                                  
-                                  const yieldPerHour = relevantYieldInfo.yieldPerHour;
-                                  const totalExpectedProfit = relevantYieldInfo.totalYield;
-                                  
-                                  // Check profitability and show reason if not profitable
-                                  if (yieldPerHour <= 0) {
+                                  if (!recommendation) {
                                     return (
-                                      <div style={{ fontSize: '11px', color: '#ff6b6b', textAlign: 'center', padding: '10px 0' }}>
-                                        Not profitable: Negative yield ({yieldPerHour.toFixed(2)}/h)
+                                      <div style={{ fontSize: '11px', color: '#888', textAlign: 'center', padding: '10px 0' }}>
+                                        Recommendation data not available
                                       </div>
                                     );
                                   }
                                   
-                                  if (totalExpectedProfit <= currentPriceESTRK * 0.05) {
-                                    const profitPercentage = ((totalExpectedProfit / currentPriceESTRK) * 100).toFixed(1);
+                                  if (!recommendation.isRecommended) {
                                     return (
                                       <div style={{ fontSize: '11px', color: '#ff6b6b', textAlign: 'center', padding: '10px 0' }}>
-                                        Not profitable: Low profitability ({profitPercentage}%, min 5%)
+                                        Not recommended: {recommendation.recommendationReason}
                                       </div>
                                     );
                                   }
                                   
-                                  // Recommended price = Current Ask + Total Yield (purchase included)
-                                  const recommendedPriceESTRK = currentPriceESTRK + relevantYieldInfo.totalYield;
-                                  
-                                  // Create temporary land with recommended price and reuse existing calculation logic
-                                  let recalculatedYieldInfo: YieldInfo;
-                                  
-                                  if (isAuction && selectedTileData.auction && selectedTileData.land) {
-                                    // For auctions, just use the existing yield info since we can't easily recalculate
-                                    // The recommended price is too high for realistic yield calculation
-                                    recalculatedYieldInfo = relevantYieldInfo;
-                                  } else if (selectedTileData.land) {
-                                    // Convert recommended price to the original token's string format
-                                    let newPriceOriginal: number;
-                                    if (selectedTileData.symbol === 'nftSTRK') {
-                                      newPriceOriginal = recommendedPriceESTRK;
-                                    } else if (selectedTileData.ratio !== null) {
-                                      // For non-nftSTRK tokens, multiply by ratio to convert back
-                                      newPriceOriginal = recommendedPriceESTRK * selectedTileData.ratio;
-                                    } else {
-                                      newPriceOriginal = recommendedPriceESTRK; // Fallback
-                                    }
-                                    const newPriceStr = Math.round(newPriceOriginal * 1e18).toString();
-
-                                    const tempLand = {
-                                      ...selectedTileData.land,
-                                      sell_price: newPriceStr
-                                    };
-                                    
-                                    const tempTiles = [...gridData.tiles];
-                                    tempTiles[selectedTileData.location] = tempLand;
-                                    
-                                    recalculatedYieldInfo = calculateTotalYieldInfoCached(
-                                      selectedTileData.location,
-                                      tempTiles,
-                                      tokenInfoCache,
-                                      neighborCache,
-                                      activeAuctions
-                                    );
-                                  } else {
-                                    recalculatedYieldInfo = relevantYieldInfo;
-                                  }
-                                  console.log(recalculatedYieldInfo);
-                                  
-                                  // Expected profit follows existing project logic: totalYieldReceived - totalTaxPaid - purchasePrice
-                                  // This is calculated with the recommended price
-                                  const recalculatedExpectedProfit = recalculatedYieldInfo.totalYield-currentPriceESTRK;
-                                  
-                                  // Calculate the resulting ROI at recommended price for buyer
-                                  const buyerROIPerHour = (recalculatedYieldInfo.yieldPerHour / recommendedPriceESTRK) * 100;
-                                  
-                                  // If total profit is not positive, don't recommend
-                                  //if (recalculatedExpectedProfit <= 0) {
-                                  //  return (
-                                  //    <div style={{ fontSize: '11px', color: '#ff6b6b', textAlign: 'center', padding: '10px 0' }}>
-                                  //      Not profitable: Yield + resale value insufficient to cover costs
-                                  //    </div>
-                                  //  );
-                                  //}
-                                  
-                                  // Calculate how much stake needed for optimal yield duration
-                                  const grossYieldESTRK = recalculatedYieldInfo.totalYield + recommendedPriceESTRK;
-                                  const optimalDuration = Math.min(168, grossYieldESTRK / Math.max(0.1, recalculatedYieldInfo.yieldPerHour)); // Max 1 week, min 0.1 to avoid division by zero
-                                  const recommendedStakeOriginal = currentBurnRate * optimalDuration;
-                                  
-                                  // Get symbol for stake display
-                                  const { symbol } = getTokenInfoCached(selectedTileData.land?.token_used || '', tokenInfoCache);
-                                  
-                                  // Calculate total investment
-                                  const currentPriceOriginal = isAuction 
-                                    ? currentPriceESTRK / (selectedTileData.ratio || 1) // Convert auction price back to original token
-                                    : parseFloat(formatOriginalPrice(selectedTileData.land.sell_price));
-                                  
-                                  const totalInvestmentOriginal = currentPriceOriginal + recommendedStakeOriginal;
+                                  // Calculate net profit (gross yield - taxes)
+                                  const netProfit = recommendation.maxYield - recommendation.requiredTotalTax;
                                   
                                   return (
                                     <>
                                       <InfoLine>
                                         <span>Current Ask:</span>
-                                        <span style={{ color: 'white' }}>{currentPriceESTRK.toFixed(1)} nftSTRK</span>
+                                        <span style={{ color: 'white' }}>{recommendation.currentPrice.toFixed(1)} nftSTRK</span>
+                                      </InfoLine>
+                                      <InfoLine>
+                                        <span>Max Yield ({durationCapHours}h):</span>
+                                        <span style={{ color: '#4CAF50' }}>{recommendation.maxYield.toFixed(1)} nftSTRK</span>
                                       </InfoLine>
                                       <InfoLine>
                                         <span>Recommended Price:</span>
-                                        <span style={{ color: '#4CAF50' }}>{recommendedPriceESTRK.toFixed(1)} nftSTRK</span>
+                                        <span style={{ color: '#4CAF50' }}>{recommendation.recommendedPrice.toFixed(1)} nftSTRK</span>
                                       </InfoLine>
                                       <InfoLine>
-                                        <span>Recommended Stake:</span>
-                                        <span style={{ color: '#7cb3ff' }}>{recommendedStakeOriginal.toFixed(1)} {symbol}</span>
+                                        <span>Required Stake:</span>
+                                        <span style={{ color: '#ff9800' }}>{recommendation.requiredStakeForFullYield.toFixed(1)} nftSTRK</span>
                                       </InfoLine>
                                       <InfoLine>
-                                        <span>Total Investment:</span>
-                                        <span style={{ color: '#ff9800' }}>{totalInvestmentOriginal.toFixed(1)} {symbol}</span>
-                                      </InfoLine>
-                                      <InfoLine>
-                                        <span>Expected Profit:</span>
-                                        <span style={{ color: '#4CAF50' }}>+{recalculatedExpectedProfit.toFixed(1)} nftSTRK</span>
-                                      </InfoLine>
-                                      <InfoLine>
-                                        <span>Pricing:</span>
-                                        <span style={{ color: '#ccc' }}>{buyerROIPerHour.toFixed(1)}% ROI for buyer</span>
+                                        <span>Net Profit:</span>
+                                        <span style={{ color: netProfit > 0 ? '#4CAF50' : '#ff6b6b' }}>
+                                          {netProfit > 0 ? '+' : ''}{netProfit.toFixed(1)} nftSTRK
+                                        </span>
                                       </InfoLine>
                                     </>
                                   );
@@ -1133,21 +1166,18 @@ const PonzilandMap = () => {
                               {selectedTileData.auction ? (
                                 <>
                                   <div>
-                                    <div style={{ fontWeight: 'bold', marginBottom: '4px', color: '#4CAF50' }}>Yield Analysis (Auction)</div>
+                                    <div style={{ fontWeight: 'bold', marginBottom: '4px', color: '#4CAF50' }}>Yield Analysis</div>
                                     {selectedTileData.auctionYieldInfo ? (
                                       <>
                                         <InfoLine>
-                                          <span>Total Yield w/o purchase:</span>
+                                          <span>Price:</span>
+                                          <span style={{ color: 'white' }}>{calculateAuctionPrice(selectedTileData.auction).toFixed(2)} nftSTRK</span>
+                                        </InfoLine>
+                                        <InfoLine>
+                                          <span>Total Yield:</span>
                                           <span style={{ color: (selectedTileData.auctionYieldInfo.totalYield + calculateAuctionPrice(selectedTileData.auction)) > 0 ? '#4CAF50' : '#ff6b6b' }}>
                                             {(selectedTileData.auctionYieldInfo.totalYield + calculateAuctionPrice(selectedTileData.auction)) > 0 ? '+':''}
                                             {(selectedTileData.auctionYieldInfo.totalYield + calculateAuctionPrice(selectedTileData.auction)).toFixed(1)} nftSTRK
-                                          </span>
-                                        </InfoLine>
-                                        <InfoLine>
-                                          <span>Total Yield w purchase:</span>
-                                          <span style={{ color: selectedTileData.auctionYieldInfo.totalYield > 0 ? '#4CAF50' : '#ff6b6b' }}>
-                                            {selectedTileData.auctionYieldInfo.totalYield > 0 ? '+':''}
-                                            {selectedTileData.auctionYieldInfo.totalYield.toFixed(1)} nftSTRK
                                           </span>
                                         </InfoLine>
                                         <InfoLine>
@@ -1181,7 +1211,7 @@ const PonzilandMap = () => {
                                     ) : (
                                       <InfoLine>
                                         <span>Price:</span>
-                                        <span>{calculateAuctionPrice(selectedTileData.auction).toFixed(1)} nftSTRK</span>
+                                        <span>{calculateAuctionPrice(selectedTileData.auction).toFixed(2)} nftSTRK</span>
                                       </InfoLine>
                                     )}
                                   </div>
@@ -1191,26 +1221,19 @@ const PonzilandMap = () => {
                                   <div>
                                     <div style={{ fontWeight: 'bold', marginBottom: '4px', color: '#4CAF50' }}>Yield Analysis</div>
                                     <InfoLine>
-                                      <span>Total Yield:</span>
-                                      <span style={{ color: (selectedTileData.yieldInfo.totalYield + selectedTileData.landPriceESTRK) > 0 ? '#4CAF50' : '#ff6b6b'}}>
-                                        {(selectedTileData.yieldInfo.totalYield + selectedTileData.landPriceESTRK) > 0 ? '+':''}
-                                        {(selectedTileData.yieldInfo.totalYield + selectedTileData.landPriceESTRK).toFixed(1)} nftSTRK
-                                      </span>
-                                    </InfoLine>
-                                    <InfoLine>
-                                      <span>Total Yield+purchase:</span>
-                                      <span style={{ color: selectedTileData.yieldInfo.totalYield > 0 ? '#4CAF50' : '#ff6b6b'}}>
-                                        {selectedTileData.yieldInfo.totalYield > 0 ? '+':''}
-                                        {selectedTileData.yieldInfo.totalYield.toFixed(1)} nftSTRK
-                                      </span>
-                                    </InfoLine>
-                                    <InfoLine>
                                       <span>Price:</span>
                                       <span style={{ color: 'white' }}>
                                         {selectedTileData.land.sell_price ? 
                                           `${selectedTileData.landPriceESTRK.toFixed(2)} nftSTRK` : 
                                           'Not for sale'
                                         }
+                                      </span>
+                                    </InfoLine>
+                                    <InfoLine>
+                                      <span>Total Yield:</span>
+                                      <span style={{ color: (selectedTileData.yieldInfo.totalYield + selectedTileData.landPriceESTRK) > 0 ? '#4CAF50' : '#ff6b6b'}}>
+                                        {(selectedTileData.yieldInfo.totalYield + selectedTileData.landPriceESTRK) > 0 ? '+':''}
+                                        {(selectedTileData.yieldInfo.totalYield + selectedTileData.landPriceESTRK).toFixed(1)} nftSTRK
                                       </span>
                                     </InfoLine>
                                     <InfoLine>
@@ -1324,33 +1347,31 @@ const PonzilandMap = () => {
           transition: 'margin-left 0.3s ease'
         }}
       >
-        {gridData.activeRows.map(row =>
-          gridData.activeCols.map(col => {
-            const location = row * GRID_SIZE + col;
-            const land = gridData.tiles[location];
-            const auction = activeAuctions[location];
-            const isHighlighted = land?.owner ? selectedPlayerAddresses.has(land.owner.toLowerCase()) : false;
+        {activeTileLocations.map(({ row, col, location }) => {
+          const land = gridData.tiles[location];
+          const auction = activeAuctions[location];
+          const isHighlighted = land?.owner ? selectedPlayerAddresses.has(land.owner.toLowerCase()) : false;
 
-            return (
-              <TileComponent
-                key={`${row}-${col}`}
-                row={row}
-                col={col}
-                location={location}
-                land={land}
-                auction={auction}
-                isHighlighted={isHighlighted}
-                tokenInfoCache={tokenInfoCache}
-                neighborCache={neighborCache}
-                gridData={gridData}
-                activeAuctions={activeAuctions}
-                selectedLayer={selectedLayer}
-                hideNotRecommended={hideNotRecommended}
-                onTileClick={handleTileClick}
-              />
-            );
-          })
-        )}
+          return (
+            <TileComponent
+              key={`${row}-${col}`}
+              row={row}
+              col={col}
+              location={location}
+              land={land}
+              auction={auction}
+              isHighlighted={isHighlighted}
+              tokenInfoCache={tokenInfoCache}
+              neighborCache={neighborCache}
+              gridData={gridData}
+              activeAuctions={activeAuctions}
+              selectedLayer={selectedLayer}
+              hideNotRecommended={hideNotRecommended}
+              durationCapHours={durationCapHours}
+              onTileClick={handleTileClick}
+            />
+          );
+        })}
       </GridContainer>
     </MapWrapper>
   );

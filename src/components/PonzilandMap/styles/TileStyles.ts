@@ -9,7 +9,7 @@ export const Tile = styled.div<{
   $isAuction: boolean;
   $opportunityColor: string;
   $isNukable: 'nukable' | 'warning' | false;
-  $auctionYield?: number;
+  $pulseGlowIntensity: number;
 }>`
   ${PULSE_ANIMATION}
   position: relative;
@@ -22,11 +22,15 @@ export const Tile = styled.div<{
   background-color: ${props => {
     if (props.$isEmpty) return '#1a1a1a';
     if (props.$isNukable === 'warning') return '#4d3015'; // Orange background for warning state
+    if (props.$isAuction) return '#2d1a2d'; // Medium purple background for auctions
     return props.$valueColor;
   }};
   border: ${props => {
     if (props.$isMyLand) {
       return '3px solid gold';
+    }
+    if (props.$isAuction) {
+      return '2px solid #4d2a4d'; // Medium purple border for auctions
     }
     return `2px solid ${props.$opportunityColor}`;
   }};
@@ -88,6 +92,7 @@ export const CompactTaxInfo = styled.div`
   text-align: center;
   line-height: 1.2;
 `;
+
 
 export const StakedInfo = styled.div<{ $isNukable: 'nukable' | 'warning' | false }>`
   position: absolute;

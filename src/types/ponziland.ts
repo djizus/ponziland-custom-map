@@ -41,6 +41,29 @@ export interface YieldInfo {
   taxPaidTotal: number;
 }
 
+export interface PurchaseRecommendation {
+  currentPrice: number;
+  maxYield: number;
+  recommendedPrice: number;
+  requiredTaxPerHour: number;
+  requiredTotalTax: number;
+  requiredStakeForFullYield: number;
+  yieldDuration: number;
+  neighborCount: number;
+  isRecommended: boolean;
+  recommendationReason: string;
+  profitMargin: number;
+  symbol: string;
+  neighborDetails: Array<{
+    location: number;
+    priceESTRK: number;
+    hourlyYield: number;
+    timeRemaining: number;
+    totalYieldFromThisNeighbor?: number;
+    symbol: string;
+  }>;
+}
+
 export interface SelectedTileDetails {
   location: number;
   coords: string;
@@ -59,4 +82,5 @@ export interface SelectedTileDetails {
   nukableStatus: 'nukable' | 'warning' | false;
   potentialYieldAuction?: number;
   auctionROI?: number;
+  purchaseRecommendation?: PurchaseRecommendation;
 }
