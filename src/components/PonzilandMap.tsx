@@ -312,7 +312,7 @@ const TileComponent = memo(({
     let recommendationMessage = purchaseRecommendation.recommendationReason;
     
     // Calculate net profit for purchasing layer
-    const netProfit = purchaseRecommendation.maxYield - purchaseRecommendation.requiredTotalTax;
+    const netProfit = purchaseRecommendation.maxYield - purchaseRecommendation.requiredTotalTax - purchaseRecommendation.currentPrice;
     
     if (auction && auctionYieldInfo) {
       effectivePrice = currentAuctionPriceForTileDisplay || 0;
@@ -1174,7 +1174,14 @@ const PonzilandMap = () => {
                                           <span style={{ color: 'white' }}>{calculateAuctionPrice(selectedTileData.auction).toFixed(2)} nftSTRK</span>
                                         </InfoLine>
                                         <InfoLine>
-                                          <span>Total Yield:</span>
+                                          <span>Net Profit:</span>
+                                          <span style={{ color: selectedTileData.auctionYieldInfo.totalYield > 0 ? '#4CAF50' : '#ff6b6b' }}>
+                                            {selectedTileData.auctionYieldInfo.totalYield > 0 ? '+':''}
+                                            {selectedTileData.auctionYieldInfo.totalYield.toFixed(1)} nftSTRK
+                                          </span>
+                                        </InfoLine>
+                                        <InfoLine>
+                                          <span>Gross Return:</span>
                                           <span style={{ color: (selectedTileData.auctionYieldInfo.totalYield + calculateAuctionPrice(selectedTileData.auction)) > 0 ? '#4CAF50' : '#ff6b6b' }}>
                                             {(selectedTileData.auctionYieldInfo.totalYield + calculateAuctionPrice(selectedTileData.auction)) > 0 ? '+':''}
                                             {(selectedTileData.auctionYieldInfo.totalYield + calculateAuctionPrice(selectedTileData.auction)).toFixed(1)} nftSTRK
@@ -1230,7 +1237,14 @@ const PonzilandMap = () => {
                                       </span>
                                     </InfoLine>
                                     <InfoLine>
-                                      <span>Total Yield:</span>
+                                      <span>Net Profit:</span>
+                                      <span style={{ color: selectedTileData.yieldInfo.totalYield > 0 ? '#4CAF50' : '#ff6b6b'}}>
+                                        {selectedTileData.yieldInfo.totalYield > 0 ? '+':''}
+                                        {selectedTileData.yieldInfo.totalYield.toFixed(1)} nftSTRK
+                                      </span>
+                                    </InfoLine>
+                                    <InfoLine>
+                                      <span>Gross Return:</span>
                                       <span style={{ color: (selectedTileData.yieldInfo.totalYield + selectedTileData.landPriceESTRK) > 0 ? '#4CAF50' : '#ff6b6b'}}>
                                         {(selectedTileData.yieldInfo.totalYield + selectedTileData.landPriceESTRK) > 0 ? '+':''}
                                         {(selectedTileData.yieldInfo.totalYield + selectedTileData.landPriceESTRK).toFixed(1)} nftSTRK

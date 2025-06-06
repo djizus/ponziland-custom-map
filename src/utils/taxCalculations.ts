@@ -522,7 +522,7 @@ export const calculatePurchaseRecommendation = (
 
   // Calculate profit margin
   const grossProfit = neighborYields.totalYield;
-  const netProfit = grossProfit - requiredTotalTax;
+  const netProfit = grossProfit - requiredTotalTax - currentPrice;
   const profitMargin = currentPrice > 0 ? (netProfit / currentPrice) * 100 : 0;
 
   // Determine recommendation
