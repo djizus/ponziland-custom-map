@@ -675,7 +675,7 @@ const PonzilandMap = () => {
     };
 
     fetchAllSqlData(true); // Initial fetch with loading indicator
-    const intervalId = setInterval(() => fetchAllSqlData(false), 60000); // Reduced frequency: every 60 seconds
+    const intervalId = setInterval(() => fetchAllSqlData(false), 5000); // Frequent updates: every 5 seconds
 
     return () => clearInterval(intervalId);
   }, []);

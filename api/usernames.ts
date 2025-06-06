@@ -4,7 +4,29 @@ export const config = {
   runtime: 'edge',
 };
 
-export const POST = async (request: Request) => {
+export default async function handler(request: Request) {
+  // Handle CORS preflight
+  if (request.method === 'OPTIONS') {
+    return new Response(null, {
+      status: 200,
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type',
+      },
+    });
+  }
+
+  if (request.method !== 'POST') {
+    return new Response(JSON.stringify({ error: 'Method not allowed' }), {
+      status: 405,
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+      },
+    });
+  }
+
   try {
     const body = await request.json();
     const clientAddresses: string[] | undefined = body.addresses;
@@ -12,7 +34,10 @@ export const POST = async (request: Request) => {
     if (!clientAddresses || !Array.isArray(clientAddresses)) {
       return new Response(JSON.stringify({ error: 'Addresses must be an array.' }), {
         status: 400,
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+        },
       });
     }
     
@@ -21,7 +46,10 @@ export const POST = async (request: Request) => {
       // consistent with client expecting a map.
       return new Response(JSON.stringify({}), {
         status: 200, 
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+        },
       });
     }
 
@@ -40,7 +68,10 @@ export const POST = async (request: Request) => {
       console.error('Socialink API error:', socialinkResponse.status, errorText);
       return new Response(JSON.stringify({ error: 'Failed to fetch usernames from Socialink', details: errorText }), {
         status: socialinkResponse.status,
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+        },
       });
     }
 
@@ -56,7 +87,10 @@ export const POST = async (request: Request) => {
 
     return new Response(JSON.stringify(usernameMap), {
       status: 200,
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+      },
     });
 
   } catch (error: any) {
@@ -73,7 +107,10 @@ export const POST = async (request: Request) => {
     
     return new Response(JSON.stringify({ error: errorMessage, details: error.message }), {
       status: statusCode,
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+      },
     });
   }
 }; 
