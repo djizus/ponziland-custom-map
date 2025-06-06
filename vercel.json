@@ -1,12 +1,4 @@
 {
-  "functions": {
-    "api/price.ts": {
-      "runtime": "@vercel/edge"
-    },
-    "api/usernames.ts": {
-      "runtime": "@vercel/edge"
-    }
-  },
   "headers": [
     {
       "source": "/api/(.*)",
