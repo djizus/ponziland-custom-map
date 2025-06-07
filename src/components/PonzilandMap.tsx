@@ -1174,13 +1174,6 @@ const PonzilandMap = () => {
                                           <span style={{ color: 'white' }}>{calculateAuctionPrice(selectedTileData.auction).toFixed(2)} nftSTRK</span>
                                         </InfoLine>
                                         <InfoLine>
-                                          <span>Net Profit:</span>
-                                          <span style={{ color: selectedTileData.auctionYieldInfo.totalYield > 0 ? '#4CAF50' : '#ff6b6b' }}>
-                                            {selectedTileData.auctionYieldInfo.totalYield > 0 ? '+':''}
-                                            {selectedTileData.auctionYieldInfo.totalYield.toFixed(1)} nftSTRK
-                                          </span>
-                                        </InfoLine>
-                                        <InfoLine>
                                           <span>Gross Return:</span>
                                           <span style={{ color: (selectedTileData.auctionYieldInfo.totalYield + calculateAuctionPrice(selectedTileData.auction)) > 0 ? '#4CAF50' : '#ff6b6b' }}>
                                             {(selectedTileData.auctionYieldInfo.totalYield + calculateAuctionPrice(selectedTileData.auction)) > 0 ? '+':''}
@@ -1234,13 +1227,6 @@ const PonzilandMap = () => {
                                           `${selectedTileData.landPriceESTRK.toFixed(2)} nftSTRK` : 
                                           'Not for sale'
                                         }
-                                      </span>
-                                    </InfoLine>
-                                    <InfoLine>
-                                      <span>Net Profit:</span>
-                                      <span style={{ color: selectedTileData.yieldInfo.totalYield > 0 ? '#4CAF50' : '#ff6b6b'}}>
-                                        {selectedTileData.yieldInfo.totalYield > 0 ? '+':''}
-                                        {selectedTileData.yieldInfo.totalYield.toFixed(1)} nftSTRK
                                       </span>
                                     </InfoLine>
                                     <InfoLine>
