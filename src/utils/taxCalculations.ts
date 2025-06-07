@@ -482,21 +482,11 @@ export const calculatePurchaseRecommendation = (
       taxPayingNeighborCount++;
     }
   });
-
-  // Calculate recommended price using conservative 2-hour strategy
-  // yield_first_2h = guaranteed yield in first 2 hours
-  // remaining_yield = risky longer-term yield
-  let yield_first_2h = 0;
-  neighborYields.neighborDetails.forEach(neighbor => {
-    const safeYieldDuration = Math.min(2, neighbor.timeRemaining);
-    yield_first_2h += neighbor.hourlyYield * safeYieldDuration;
-  });
   
-  const remaining_yield = neighborYields.totalYield - yield_first_2h;
-  const recommendedPrice = currentPrice * 1.1;
+  let recommendedPrice = currentPrice;
 
   // Calculate required tax payments - accounting for when each neighbor gets nuked
-  const requiredTaxPerHour = recommendedPrice * myTaxRate;
+  let requiredTaxPerHour = recommendedPrice * myTaxRate;
   let requiredTotalTax = 0;
   
   // Calculate tax paid to each neighbor until they get nuked
@@ -515,19 +505,19 @@ export const calculatePurchaseRecommendation = (
   });
   
   // Calculate required stake in nftSTRK (always display in nftSTRK for consistency)
-  const requiredStakeForFullYield = requiredTotalTax;
+  let requiredStakeForFullYield = requiredTotalTax;
 
   // Calculate net profit
-  const grossProfit = neighborYields.totalYield;
-  const netProfit = grossProfit - requiredTotalTax - currentPrice;
+  let grossProfit = neighborYields.totalYield;
+  let netProfit = grossProfit - requiredTotalTax - currentPrice;
 
   // Determine recommendation
   let isRecommended = false;
   let recommendationReason = '';
 
-  if (location === 2335 ) {
-    console.log({ location, neighborYields, currentPrice, recommendedPrice, requiredTaxPerHour, requiredTotalTax, requiredStakeForFullYield, yieldDuration: neighborYields.longestNeighborDuration, neighborCount: neighborYields.neighborDetails.length, isRecommended, recommendationReason, symbol, neighborDetails: neighborYields.neighborDetails, grossProfit, netProfit, taxPayingNeighborCount,yield_first_2h,remaining_yield, myTaxRate });
-  }
+  // if (location === 2335 ) {
+  //   console.log({ location, neighborYields, currentPrice, recommendedPrice, requiredTaxPerHour, requiredTotalTax, requiredStakeForFullYield, yieldDuration: neighborYields.longestNeighborDuration, neighborCount: neighborYields.neighborDetails.length, isRecommended, recommendationReason, symbol, neighborDetails: neighborYields.neighborDetails, grossProfit, netProfit, taxPayingNeighborCount,yield_first_2h,remaining_yield, myTaxRate });
+  // }
   if (neighborYields.yieldPerHour <= 0) {
     recommendationReason = 'No yield potential';
   } else if (netProfit <= currentPrice * 0.02) {
@@ -535,6 +525,41 @@ export const calculatePurchaseRecommendation = (
   } else {
     isRecommended = true;
     recommendationReason = 'Profitable';
+    // Calculate recommended price using conservative 2-hour strategy
+    // yield_first_2h = guaranteed yield in first 2 hours
+    // remaining_yield = risky longer-term yield
+    let yield_first_1h = 0;
+    neighborYields.neighborDetails.forEach(neighbor => {
+      const safeYieldDuration = Math.min(1, neighbor.timeRemaining);
+      yield_first_1h += neighbor.hourlyYield * safeYieldDuration;
+    });
+    recommendedPrice = currentPrice + (yield_first_1h * 0.8);
+
+    // Calculate required tax payments - accounting for when each neighbor gets nuked
+    requiredTaxPerHour = recommendedPrice * myTaxRate;
+    let requiredTotalTax = 0;
+    
+    // Calculate tax paid to each neighbor until they get nuked
+    neighbors.forEach(neighborLoc => {
+      const neighbor = lands[neighborLoc];
+      if (neighbor && !activeAuctions[neighborLoc] && neighbor.owner) {
+        const neighborBurnRate = calculateBurnRate(neighbor, lands, activeAuctions);
+        const neighborTimeRemaining = calculateTimeRemainingHours(neighbor, neighborBurnRate);
+        
+        if (neighborTimeRemaining > 0) {
+          // We pay tax to this neighbor until either they get nuked or we reach our duration cap
+          const taxPaymentDuration = Math.min(durationCapHours, neighborTimeRemaining);
+          requiredTotalTax += requiredTaxPerHour * taxPaymentDuration;
+        }
+      }
+    });
+    
+    // Calculate required stake in nftSTRK (always display in nftSTRK for consistency)
+    requiredStakeForFullYield = requiredTotalTax;
+  
+    // Calculate net profit
+    grossProfit = neighborYields.totalYield;
+    netProfit = grossProfit - requiredTotalTax - currentPrice;
   }
 
   return {
