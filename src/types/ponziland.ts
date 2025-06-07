@@ -52,7 +52,6 @@ export interface PurchaseRecommendation {
   neighborCount: number;
   isRecommended: boolean;
   recommendationReason: string;
-  profitMargin: number;
   symbol: string;
   neighborDetails: Array<{
     location: number;

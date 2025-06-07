@@ -395,7 +395,6 @@ export const calculatePurchaseRecommendation = (
   neighborCount: number;
   isRecommended: boolean;
   recommendationReason: string;
-  profitMargin: number;
   symbol: string;
   neighborDetails: Array<{
     location: number;
@@ -417,7 +416,6 @@ export const calculatePurchaseRecommendation = (
       neighborCount: 0,
       isRecommended: false,
       recommendationReason: 'Empty land',
-      profitMargin: 0,
       symbol: 'nftSTRK',
       neighborDetails: [] as Array<{
         location: number;
@@ -460,7 +458,6 @@ export const calculatePurchaseRecommendation = (
       neighborCount: 0,
       isRecommended: false,
       recommendationReason: 'No profitable neighbors',
-      profitMargin: 0,
       symbol,
       neighborDetails: [] as Array<{
         location: number;
@@ -496,7 +493,7 @@ export const calculatePurchaseRecommendation = (
   });
   
   const remaining_yield = neighborYields.totalYield - yield_first_2h;
-  const recommendedPrice = currentPrice + (yield_first_2h * 0.8) + (remaining_yield * 0.2);
+  const recommendedPrice = currentPrice * 1.1;
 
   // Calculate required tax payments - accounting for when each neighbor gets nuked
   const requiredTaxPerHour = recommendedPrice * myTaxRate;
@@ -520,17 +517,16 @@ export const calculatePurchaseRecommendation = (
   // Calculate required stake in nftSTRK (always display in nftSTRK for consistency)
   const requiredStakeForFullYield = requiredTotalTax;
 
-  // Calculate profit margin
+  // Calculate net profit
   const grossProfit = neighborYields.totalYield;
   const netProfit = grossProfit - requiredTotalTax - currentPrice;
-  const profitMargin = currentPrice > 0 ? (netProfit / currentPrice) * 100 : 0;
 
   // Determine recommendation
   let isRecommended = false;
   let recommendationReason = '';
 
-  if (location === 2462) {
-    console.log({ location, neighborYields, currentPrice, recommendedPrice, requiredTaxPerHour, requiredTotalTax, requiredStakeForFullYield, yieldDuration: neighborYields.longestNeighborDuration, neighborCount: neighborYields.neighborDetails.length, isRecommended, recommendationReason, profitMargin, symbol, neighborDetails: neighborYields.neighborDetails });
+  if (location === 2335 ) {
+    console.log({ location, neighborYields, currentPrice, recommendedPrice, requiredTaxPerHour, requiredTotalTax, requiredStakeForFullYield, yieldDuration: neighborYields.longestNeighborDuration, neighborCount: neighborYields.neighborDetails.length, isRecommended, recommendationReason, symbol, neighborDetails: neighborYields.neighborDetails, grossProfit, netProfit, taxPayingNeighborCount,yield_first_2h,remaining_yield, myTaxRate });
   }
   if (neighborYields.yieldPerHour <= 0) {
     recommendationReason = 'No yield potential';
@@ -552,7 +548,6 @@ export const calculatePurchaseRecommendation = (
     neighborCount: neighborYields.neighborDetails.length,
     isRecommended,
     recommendationReason,
-    profitMargin,
     symbol,
     neighborDetails: neighborYields.neighborDetails.map((n: any) => {
       // Ensure all required properties exist

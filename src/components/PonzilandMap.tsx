@@ -1120,8 +1120,8 @@ const PonzilandMap = () => {
                                     );
                                   }
                                   
-                                  // Calculate net profit (gross yield - taxes)
-                                  const netProfit = recommendation.maxYield - recommendation.requiredTotalTax;
+                                  // Calculate net profit (gross yield - taxes - purchase price)
+                                  const netProfit = recommendation.maxYield - recommendation.requiredTotalTax - recommendation.currentPrice;
                                   
                                   return (
                                     <>
