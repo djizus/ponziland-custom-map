@@ -49,8 +49,7 @@ import {
 } from '../utils/auctionUtils';
 
 import { 
-  getValueColor, 
-  getOpportunityColor 
+  getValueColor
 } from '../utils/visualUtils';
 
 // Import styled components
@@ -334,23 +333,23 @@ const TileComponent = memo(({
     }
       
     // For purchasing layer, use net profit for color (or gray for not recommended)
-    // For yield analysis layer, use yieldPerHour for color
+    // For analysis layer, use gross return (total yield + purchase price) for color
     const colorValue = selectedLayer === 'yield' ? 
       (isRecommendedForPurchase ? netProfit : -1) : // -1 will make it gray
-      (auction && auctionYieldInfo ? auctionYieldInfo.yieldPerHour : yieldInfo.yieldPerHour);
+      (auction && auctionYieldInfo ? 
+        auctionYieldInfo.totalYield + (currentAuctionPriceForTileDisplay || 0) : 
+        yieldInfo.totalYield + landPriceESTRK);
     
     const valueColor = land ? getValueColor(
       land.sell_price, 
       colorValue
     ) : '#1a1a1a';
-    
-    const opportunityColor = getOpportunityColor(colorValue, effectivePrice);
 
     return {
       symbol, ratio, taxInfo, yieldInfo, auctionYieldInfo, landPriceESTRK, 
       burnRate, nukableStatus, potentialYieldAuction, auctionROIForDetails,
       currentAuctionPriceForTileDisplay, displayYield, effectivePrice, 
-      valueColor, opportunityColor, isRecommendedForPurchase, recommendationMessage,
+      valueColor, isRecommendedForPurchase, recommendationMessage,
       purchaseRecommendation, netProfit
     };
   }, [location, land, auction, tokenInfoCache, neighborCache, gridData.tiles, activeAuctions, selectedLayer, auctionCalculations, durationCapHours]);
@@ -367,7 +366,6 @@ const TileComponent = memo(({
     ratio: tileData.ratio,
     landPriceESTRK: tileData.landPriceESTRK,
     valueColor: tileData.valueColor,
-    opportunityColor: tileData.opportunityColor,
     isMyLand: isHighlighted,
     burnRate: tileData.burnRate,
     nukableStatus: tileData.nukableStatus,
@@ -395,9 +393,10 @@ const TileComponent = memo(({
       $isEmpty={!!(!land || shouldShowAsEmpty)}
       $valueColor={shouldShowAsEmpty ? '#1a1a1a' : tileData.valueColor}
       $isAuction={!!auction && !shouldShowAsEmpty}
-      $opportunityColor={shouldShowAsEmpty ? '#333' : tileData.opportunityColor}
       $isNukable={shouldShowAsEmpty ? false : tileData.nukableStatus}
       $pulseGlowIntensity={0}
+      $isRecommendedForPurchase={!shouldShowAsEmpty && tileData.isRecommendedForPurchase}
+      $isAnalysisLayer={selectedLayer !== 'yield'}
     >
       <TileLocation>{displayCoordinates(col, row)}</TileLocation>
       {land && !shouldShowAsEmpty && (

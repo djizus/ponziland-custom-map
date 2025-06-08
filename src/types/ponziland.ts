@@ -75,7 +75,6 @@ export interface SelectedTileDetails {
   ratio: number | null;
   landPriceESTRK: number;
   valueColor: string;
-  opportunityColor: string;
   isMyLand: boolean;
   burnRate: number;
   nukableStatus: 'nukable' | 'warning' | false;

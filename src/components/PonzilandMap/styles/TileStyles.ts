@@ -7,9 +7,10 @@ export const Tile = styled.div<{
   $isEmpty: boolean;
   $valueColor: string;
   $isAuction: boolean;
-  $opportunityColor: string;
   $isNukable: 'nukable' | 'warning' | false;
   $pulseGlowIntensity: number;
+  $isRecommendedForPurchase: boolean;
+  $isAnalysisLayer: boolean;
 }>`
   ${PULSE_ANIMATION}
   position: relative;
@@ -32,16 +33,17 @@ export const Tile = styled.div<{
     if (props.$isAuction) {
       return '2px solid #4d2a4d'; // Medium purple border for auctions
     }
-    return `2px solid ${props.$opportunityColor}`;
+    if (props.$isAnalysisLayer && props.$isRecommendedForPurchase && !props.$isEmpty) {
+      return '2px solid rgba(0, 255, 0, 0.8)'; // Green glowing border for recommended purchases
+    }
+    return '2px solid #333'; // Default border color
   }};
   box-shadow: ${props => {
     if (props.$isMyLand) {
-      return props.$opportunityColor !== '#333' 
-        ? `0 0 15px rgba(255, 215, 0, 0.5), 0 0 10px ${props.$opportunityColor}`
-        : '0 0 15px rgba(255, 215, 0, 0.5)';
+      return '0 0 15px rgba(255, 215, 0, 0.5)';
     }
-    if (props.$opportunityColor !== '#333') {
-      return `0 0 10px ${props.$opportunityColor}`;
+    if (props.$isAnalysisLayer && props.$isRecommendedForPurchase && !props.$isEmpty) {
+      return '0 0 8px rgba(0, 255, 0, 0.6), 0 0 16px rgba(0, 255, 0, 0.3)'; // Green border glow for recommended purchases
     }
     return 'none';
   }};
