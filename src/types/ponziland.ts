@@ -63,6 +63,8 @@ export interface PurchaseRecommendation {
   }>;
 }
 
+export type MapLayer = 'purchasing' | 'yield' | 'token';
+
 export interface SelectedTileDetails {
   location: number;
   coords: string;

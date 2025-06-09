@@ -10,6 +10,13 @@ export const MapWrapper = styled.div`
   background: #1a1a1a;
   padding: 20px;
   display: flex;
+  align-items: flex-start;
+  gap: 20px;
+`;
+
+export const GridWrapper = styled.div`
+  flex: 1;
+  display: flex;
   justify-content: center;
   align-items: flex-start;
 `;

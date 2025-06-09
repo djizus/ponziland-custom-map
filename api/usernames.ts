@@ -94,7 +94,8 @@ export default async function handler(request: Request) {
     });
 
   } catch (error: any) {
-    console.error('Error in /api/usernames:', error);
+    // Standardized API error handling
+    const timestamp = new Date().toISOString();
     let errorMessage = 'Internal server error';
     let statusCode = 500;
 
@@ -104,8 +105,18 @@ export default async function handler(request: Request) {
     } else if (error.message) {
         errorMessage = error.message;
     }
+
+    console.error(`[${timestamp}] [API_USERNAMES] ${errorMessage}`, {
+      error,
+      statusCode,
+      requestMethod: 'POST', // We know it's POST from the function logic
+    });
     
-    return new Response(JSON.stringify({ error: errorMessage, details: error.message }), {
+    return new Response(JSON.stringify({ 
+      error: errorMessage, 
+      timestamp,
+      details: undefined // Edge runtime doesn't have process.env access in the same way
+    }), {
       status: statusCode,
       headers: { 
         'Content-Type': 'application/json',

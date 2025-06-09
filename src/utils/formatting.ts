@@ -1,15 +1,38 @@
 import { TokenPrice } from '../types/ponziland';
+import { logError } from './errorHandler';
 
 export const formatRatio = (ratio: number | null): string => {
-  if (ratio === null || ratio === undefined) {
+  try {
+    if (ratio === null || ratio === undefined) {
+      return 'N/A';
+    }
+    
+    if (typeof ratio !== 'number' || !isFinite(ratio)) {
+      logError('FORMAT_RATIO', new Error('Invalid ratio value'), {
+        component: 'formatting',
+        metadata: { ratio, type: typeof ratio }
+      });
+      return 'N/A';
+    }
+    
+    if (ratio >= 1) {
+      return ratio.toFixed(2);
+    }
+    
+    if (ratio <= 0) {
+      return '0.00';
+    }
+    
+    // For small numbers, calculate appropriate decimal places
+    const decimalPlaces = Math.max(2, -Math.floor(Math.log10(ratio)) + 2);
+    return ratio.toFixed(decimalPlaces);
+  } catch (error) {
+    logError('FORMAT_RATIO', error, {
+      component: 'formatting',
+      metadata: { ratio }
+    });
     return 'N/A';
   }
-  if (ratio >= 1) {
-    return ratio.toFixed(2);
-  }
-  // For small numbers, calculate appropriate decimal places
-  const decimalPlaces = Math.max(2, -Math.floor(Math.log10(ratio)) + 2);
-  return ratio.toFixed(decimalPlaces);
 };
 
 export const getTokenInfo = (address: string, prices: TokenPrice[]): { symbol: string; ratio: number | null } => {
@@ -57,8 +80,36 @@ export const displayCoordinates = (x: number | string, y: number | string): stri
 };
 
 export const hexToDecimal = (hex: string): number => {
-  if (!hex || hex === '0x0') return 0;
-  return parseInt(hex, 16) / 1e18; // Assuming 18 decimals
+  try {
+    if (!hex || hex === '0x0') return 0;
+    
+    // Validate hex format
+    if (typeof hex !== 'string' || !/^0x[0-9a-fA-F]+$/.test(hex)) {
+      logError('HEX_TO_DECIMAL', new Error('Invalid hex format'), {
+        component: 'formatting',
+        metadata: { hex, type: typeof hex }
+      });
+      return 0;
+    }
+    
+    const result = parseInt(hex, 16) / 1e18; // Assuming 18 decimals
+    
+    if (!isFinite(result)) {
+      logError('HEX_TO_DECIMAL', new Error('Result is not finite'), {
+        component: 'formatting', 
+        metadata: { hex, result }
+      });
+      return 0;
+    }
+    
+    return result;
+  } catch (error) {
+    logError('HEX_TO_DECIMAL', error, {
+      component: 'formatting',
+      metadata: { hex }
+    });
+    return 0;
+  }
 };
 
 export const formatTimeRemaining = (hours: number): string => {

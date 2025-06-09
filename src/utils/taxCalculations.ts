@@ -515,9 +515,6 @@ export const calculatePurchaseRecommendation = (
   let isRecommended = false;
   let recommendationReason = '';
 
-  // if (location === 2335 ) {
-  //   console.log({ location, neighborYields, currentPrice, recommendedPrice, requiredTaxPerHour, requiredTotalTax, requiredStakeForFullYield, yieldDuration: neighborYields.longestNeighborDuration, neighborCount: neighborYields.neighborDetails.length, isRecommended, recommendationReason, symbol, neighborDetails: neighborYields.neighborDetails, grossProfit, netProfit, taxPayingNeighborCount,yield_first_2h,remaining_yield, myTaxRate });
-  // }
   if (neighborYields.yieldPerHour <= 0) {
     recommendationReason = 'No yield potential';
   } else if (netProfit <= currentPrice * 0.02) {

@@ -1,9 +1,12 @@
 import PonzilandMap from './components/PonzilandMap';
+import ErrorBoundary from './components/ErrorBoundary';
 import './App.css';
 
 function App() {
   return (
-    <PonzilandMap />
+    <ErrorBoundary context="APP_ROOT">
+      <PonzilandMap />
+    </ErrorBoundary>
   );
 }
 

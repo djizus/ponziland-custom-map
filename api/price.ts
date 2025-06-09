@@ -43,8 +43,21 @@ export default async function handler(req: Request) {
       },
     });
   } catch (error) {
-    console.error('Error fetching prices:', error);
-    return new Response(JSON.stringify({ error: 'Failed to fetch prices' }), {
+    // Standardized API error handling
+    const timestamp = new Date().toISOString();
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    
+    console.error(`[${timestamp}] [API_PRICE] ${errorMessage}`, {
+      error,
+      endpoint: 'https://api.ponzi.land/price',
+      userAgent: req.headers.get('user-agent'),
+    });
+
+    return new Response(JSON.stringify({ 
+      error: 'Failed to fetch prices',
+      timestamp,
+      details: undefined // Edge runtime doesn't have process.env access in the same way
+    }), {
       status: 500,
       headers: {
         'Content-Type': 'application/json',
