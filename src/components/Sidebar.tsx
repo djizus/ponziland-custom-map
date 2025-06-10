@@ -350,7 +350,7 @@ const Sidebar = memo(({
                       <TokenItem key={token.address}>
                         <TokenSymbol>nftSTRK</TokenSymbol>
                         <TokenRatio>
-                          {token.ratio !== null ? formatRatio(token.ratio) : 'N/A'}
+                          {token.symbol === 'nftSTRK' ? '1.00' : (token.ratio !== null ? formatRatio(token.ratio) : 'N/A')}
                         </TokenRatio>
                         <TokenTarget>{token.symbol}</TokenTarget>
                       </TokenItem>
@@ -437,7 +437,7 @@ const Sidebar = memo(({
                                       >
                                         {sortedPrices.map(token => (
                                           <option key={token.address} value={token.address} style={{ backgroundColor: '#333' }}>
-                                            {token.symbol} ({formatRatio(token.ratio)})
+                                            {token.symbol} ({token.symbol === 'nftSTRK' ? '1.00' : formatRatio(token.ratio)})
                                           </option>
                                         ))}
                                       </select>
