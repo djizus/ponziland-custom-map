@@ -73,6 +73,7 @@ interface SidebarProps {
   activeTab: 'map' | 'analysis';
   selectedLayer: MapLayer;
   selectedToken: string;
+  selectedStakeToken: string;
   durationCapHours: number;
   prices: TokenPrice[];
   allPlayers: Array<{ address: string; displayName: string; originalAddress: string }>;
@@ -84,6 +85,7 @@ interface SidebarProps {
   onTabChange: (tab: 'map' | 'analysis') => void;
   onLayerChange: (layer: MapLayer) => void;
   onTokenChange: (token: string) => void;
+  onStakeTokenChange: (token: string) => void;
   onDurationCapChange: (hours: number) => void;
   onPlayerSelectionChange: (address: string, isSelected: boolean) => void;
 }
@@ -92,6 +94,7 @@ const Sidebar = memo(({
   activeTab,
   selectedLayer,
   selectedToken,
+  selectedStakeToken,
   durationCapHours,
   prices,
   allPlayers,
@@ -103,6 +106,7 @@ const Sidebar = memo(({
   onTabChange,
   onLayerChange,
   onTokenChange,
+  onStakeTokenChange,
   onDurationCapChange,
   onPlayerSelectionChange
 }: SidebarProps) => {
@@ -415,9 +419,49 @@ const Sidebar = memo(({
                                 
                                 return (
                                   <>
+                                    {/* Stake Token Selector */}
+                                    <div style={{ marginBottom: '8px' }}>
+                                      <InfoLabel style={{ display: 'block', marginBottom: '4px' }}>Stake Token:</InfoLabel>
+                                      <select
+                                        value={selectedStakeToken || selectedTileData.land.token_used}
+                                        onChange={(e) => onStakeTokenChange(e.target.value)}
+                                        style={{
+                                          width: '100%',
+                                          padding: '6px',
+                                          backgroundColor: 'rgba(255, 255, 255, 0.1)',
+                                          border: '1px solid rgba(255, 255, 255, 0.2)',
+                                          borderRadius: '4px',
+                                          color: 'white',
+                                          fontSize: '11px'
+                                        }}
+                                      >
+                                        {sortedPrices.map(token => (
+                                          <option key={token.address} value={token.address} style={{ backgroundColor: '#333' }}>
+                                            {token.symbol} ({formatRatio(token.ratio)})
+                                          </option>
+                                        ))}
+                                      </select>
+                                    </div>
+                                    
                                     <InfoLine>
                                       <InfoLabel>Current Ask:</InfoLabel>
-                                      <InfoValue>{recommendation.currentPrice.toFixed(1)} nftSTRK</InfoValue>
+                                      <InfoValue>
+                                        {(() => {
+                                          const stakeToken = selectedStakeToken || selectedTileData.land.token_used;
+                                          const stakeTokenInfo = prices.find(p => p.address === stakeToken);
+                                          const stakeTokenSymbol = stakeTokenInfo?.symbol || 'nftSTRK';
+                                          const stakeTokenRatio = stakeTokenInfo?.ratio || 1;
+                                          
+                                          // If stake token is nftSTRK, no conversion needed
+                                          if (stakeTokenSymbol === 'nftSTRK') {
+                                            return `${recommendation.currentPrice.toFixed(1)} nftSTRK`;
+                                          }
+                                          
+                                          // Convert from nftSTRK to stake token (multiply by ratio)
+                                          const priceInStakeToken = recommendation.currentPrice * stakeTokenRatio;
+                                          return `${priceInStakeToken.toFixed(1)} ${stakeTokenSymbol}`;
+                                        })()}
+                                      </InfoValue>
                                     </InfoLine>
                                     <InfoLine>
                                       <span>Max Yield ({durationCapHours}h):</span>
@@ -425,11 +469,43 @@ const Sidebar = memo(({
                                     </InfoLine>
                                     <InfoLine>
                                       <span>Recommended Price:</span>
-                                      <span style={{ color: '#4CAF50' }}>{recommendation.recommendedPrice.toFixed(1)} nftSTRK</span>
+                                      <span style={{ color: '#03a9f4' }}>
+                                        {(() => {
+                                          const stakeToken = selectedStakeToken || selectedTileData.land.token_used;
+                                          const stakeTokenInfo = prices.find(p => p.address === stakeToken);
+                                          const stakeTokenSymbol = stakeTokenInfo?.symbol || 'nftSTRK';
+                                          const stakeTokenRatio = stakeTokenInfo?.ratio || 1;
+                                          
+                                          // If stake token is nftSTRK, no conversion needed
+                                          if (stakeTokenSymbol === 'nftSTRK') {
+                                            return `${recommendation.recommendedPrice.toFixed(1)} nftSTRK`;
+                                          }
+                                          
+                                          // Convert from nftSTRK to stake token (multiply by ratio)
+                                          const priceInStakeToken = recommendation.recommendedPrice * stakeTokenRatio;
+                                          return `${priceInStakeToken.toFixed(1)} ${stakeTokenSymbol}`;
+                                        })()}
+                                      </span>
                                     </InfoLine>
                                     <InfoLine>
                                       <span>Required Stake:</span>
-                                      <span style={{ color: '#ff9800' }}>{recommendation.requiredStakeForFullYield.toFixed(1)} nftSTRK</span>
+                                      <span style={{ color: '#ff9800' }}>
+                                        {(() => {
+                                          const stakeToken = selectedStakeToken || selectedTileData.land.token_used;
+                                          const stakeTokenInfo = prices.find(p => p.address === stakeToken);
+                                          const stakeTokenSymbol = stakeTokenInfo?.symbol || 'nftSTRK';
+                                          const stakeTokenRatio = stakeTokenInfo?.ratio || 1;
+                                          
+                                          // If stake token is nftSTRK, no conversion needed
+                                          if (stakeTokenSymbol === 'nftSTRK') {
+                                            return `${recommendation.requiredStakeForFullYield.toFixed(1)} nftSTRK`;
+                                          }
+                                          
+                                          // Convert from nftSTRK to stake token (multiply by ratio)
+                                          const requiredInStakeToken = recommendation.requiredStakeForFullYield * stakeTokenRatio;
+                                          return `${requiredInStakeToken.toFixed(1)} ${stakeTokenSymbol}`;
+                                        })()}
+                                      </span>
                                     </InfoLine>
                                     <InfoLine>
                                       <span>Net Profit:</span>

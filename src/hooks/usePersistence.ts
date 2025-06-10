@@ -8,7 +8,8 @@ export const usePersistence = (
   isSidebarCollapsed: boolean,
   activeTab: 'map' | 'analysis',
   durationCapHours: number,
-  selectedToken: string
+  selectedToken: string,
+  selectedStakeToken: string
 ) => {
   // Persistence effects - save state changes to localStorage
   useEffect(() => {
@@ -38,4 +39,8 @@ export const usePersistence = (
   useEffect(() => {
     localStorage.setItem('ponziland-selected-token', JSON.stringify(selectedToken));
   }, [selectedToken]);
+
+  useEffect(() => {
+    localStorage.setItem('ponziland-stake-token', JSON.stringify(selectedStakeToken));
+  }, [selectedStakeToken]);
 };

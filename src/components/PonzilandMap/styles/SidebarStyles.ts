@@ -7,12 +7,15 @@ import { theme, mixins } from './theme';
 
 // Main sidebar container - always visible
 export const SidebarContainer = styled.div`
+  position: sticky;
+  top: 20px;
   width: 280px;
   height: calc(100vh - 40px);
   ${mixins.panelBase}
   ${mixins.flexColumn}
   overflow: hidden;
   flex-shrink: 0;
+  align-self: flex-start;
 `;
 
 // Sidebar header with toggle button
