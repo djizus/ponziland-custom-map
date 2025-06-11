@@ -78,6 +78,10 @@ const PonzilandMap = () => {
     () => loadPersistedState<string>('ponziland-stake-token', '')
   );
 
+  const [showNotOwned, setShowNotOwned] = useState<boolean>(
+    () => loadPersistedState<boolean>('ponziland-show-not-owned', false)
+  );
+
   // Use player stats hook
   const playerStats = usePlayerStats(
     selectedPlayerAddresses,
@@ -91,7 +95,7 @@ const PonzilandMap = () => {
   );
 
   // Use persistence hook (sidebar always visible now)
-  usePersistence(selectedPlayerAddresses, selectedLayer, selectedLayer === 'yield', false, activeTab, durationCapHours, selectedToken, selectedStakeToken);
+  usePersistence(selectedPlayerAddresses, selectedLayer, selectedLayer === 'yield', false, activeTab, durationCapHours, selectedToken, selectedStakeToken, showNotOwned);
 
   // Event handlers
   const handleTileClick = useCallback((tileDetails: SelectedTileDetails) => {
@@ -161,6 +165,7 @@ const PonzilandMap = () => {
         selectedLayer={selectedLayer}
         selectedToken={selectedToken}
         selectedStakeToken={selectedStakeToken}
+        showNotOwned={showNotOwned}
         durationCapHours={durationCapHours}
         prices={prices}
         allPlayers={allPlayers}
@@ -173,6 +178,7 @@ const PonzilandMap = () => {
         onLayerChange={setSelectedLayer}
         onTokenChange={setSelectedToken}
         onStakeTokenChange={setSelectedStakeToken}
+        onShowNotOwnedChange={setShowNotOwned}
         onDurationCapChange={setDurationCapHours}
         onPlayerSelectionChange={handlePlayerSelectionChange}
         />
@@ -190,6 +196,7 @@ const PonzilandMap = () => {
           selectedPlayerAddresses={selectedPlayerAddresses}
           selectedLayer={selectedLayer}
           selectedToken={selectedToken}
+          showNotOwned={showNotOwned}
           hideNotRecommended={selectedLayer === 'yield'}
           durationCapHours={durationCapHours}
           zoom={zoom}

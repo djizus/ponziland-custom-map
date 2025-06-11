@@ -16,6 +16,7 @@ interface GridRendererProps {
   selectedPlayerAddresses: Set<string>;
   selectedLayer: MapLayer;
   selectedToken: string;
+  showNotOwned: boolean;
   hideNotRecommended: boolean;
   durationCapHours: number;
   zoom: number;
@@ -31,6 +32,7 @@ const GridRenderer = memo(({
   selectedPlayerAddresses,
   selectedLayer,
   selectedToken,
+  showNotOwned,
   hideNotRecommended,
   durationCapHours,
   zoom,
@@ -56,12 +58,13 @@ const GridRenderer = memo(({
         activeAuctions,
         selectedLayer,
         selectedToken,
+        showNotOwned,
         hideNotRecommended,
         durationCapHours,
         onTileClick
       };
     });
-  }, [activeTileLocations, gridData.tiles, activeAuctions, selectedPlayerAddresses, tokenInfoCache, neighborCache, gridData, selectedLayer, selectedToken, hideNotRecommended, durationCapHours, onTileClick]);
+  }, [activeTileLocations, gridData.tiles, activeAuctions, selectedPlayerAddresses, tokenInfoCache, neighborCache, gridData, selectedLayer, selectedToken, showNotOwned, hideNotRecommended, durationCapHours, onTileClick]);
 
   return (
     <GridContainer

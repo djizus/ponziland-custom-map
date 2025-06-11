@@ -98,6 +98,7 @@ interface TileComponentProps {
   activeAuctions: Record<number, PonziLandAuction>;
   selectedLayer: MapLayer;
   selectedToken: string;
+  showNotOwned: boolean;
   hideNotRecommended: boolean;
   durationCapHours: number;
   onTileClick: (tileDetails: SelectedTileDetails) => void;
@@ -105,7 +106,7 @@ interface TileComponentProps {
 
 const TileComponent = memo(({ 
   row, col, location, land, auction, isHighlighted, tokenInfoCache, neighborCache, 
-  gridData, activeAuctions, selectedLayer, selectedToken, hideNotRecommended, durationCapHours, onTileClick 
+  gridData, activeAuctions, selectedLayer, selectedToken, showNotOwned, hideNotRecommended, durationCapHours, onTileClick 
 }: TileComponentProps) => {
   // Use custom hook for expensive auction calculations
   const auctionCalculations = useAuctionCalculations(
@@ -154,8 +155,10 @@ const TileComponent = memo(({
     // Calculate net profit for purchasing layer
     const netProfit = purchaseRecommendation.maxYield - purchaseRecommendation.requiredTotalTax - purchaseRecommendation.currentPrice;
     
-    // For token layer, check if this tile uses the selected token
-    const isSelectedTokenTile = selectedLayer === 'token' && selectedToken && land?.token_used === selectedToken;
+    // For token layer, check if this tile matches the filter criteria
+    const isSelectedTokenTile = selectedLayer === 'token' && selectedToken && land && (
+      showNotOwned ? land.token_used !== selectedToken : land.token_used === selectedToken
+    );
     
     if (auction && auctionYieldInfo) {
       effectivePrice = currentAuctionPriceForTileDisplay || 0;
@@ -234,7 +237,9 @@ const TileComponent = memo(({
   // Check if this tile should be hidden (shown as empty)
   const shouldShowAsEmpty = (selectedLayer === 'yield' && hideNotRecommended && 
     land && !tileData.isRecommendedForPurchase) ||
-    (selectedLayer === 'token' && selectedToken && land && land.token_used !== selectedToken);
+    (selectedLayer === 'token' && selectedToken && land && (
+      showNotOwned ? land.token_used === selectedToken : land.token_used !== selectedToken
+    ));
 
   return (
     <Tile

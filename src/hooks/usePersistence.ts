@@ -9,7 +9,8 @@ export const usePersistence = (
   activeTab: 'map' | 'analysis',
   durationCapHours: number,
   selectedToken: string,
-  selectedStakeToken: string
+  selectedStakeToken: string,
+  showNotOwned: boolean
 ) => {
   // Persistence effects - save state changes to localStorage
   useEffect(() => {
@@ -43,4 +44,8 @@ export const usePersistence = (
   useEffect(() => {
     localStorage.setItem('ponziland-stake-token', JSON.stringify(selectedStakeToken));
   }, [selectedStakeToken]);
+
+  useEffect(() => {
+    localStorage.setItem('ponziland-show-not-owned', JSON.stringify(showNotOwned));
+  }, [showNotOwned]);
 };

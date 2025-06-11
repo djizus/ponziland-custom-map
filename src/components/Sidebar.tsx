@@ -74,6 +74,7 @@ interface SidebarProps {
   selectedLayer: MapLayer;
   selectedToken: string;
   selectedStakeToken: string;
+  showNotOwned: boolean;
   durationCapHours: number;
   prices: TokenPrice[];
   allPlayers: Array<{ address: string; displayName: string; originalAddress: string }>;
@@ -86,6 +87,7 @@ interface SidebarProps {
   onLayerChange: (layer: MapLayer) => void;
   onTokenChange: (token: string) => void;
   onStakeTokenChange: (token: string) => void;
+  onShowNotOwnedChange: (show: boolean) => void;
   onDurationCapChange: (hours: number) => void;
   onPlayerSelectionChange: (address: string, isSelected: boolean) => void;
 }
@@ -95,6 +97,7 @@ const Sidebar = memo(({
   selectedLayer,
   selectedToken,
   selectedStakeToken,
+  showNotOwned,
   durationCapHours,
   prices,
   allPlayers,
@@ -107,6 +110,7 @@ const Sidebar = memo(({
   onLayerChange,
   onTokenChange,
   onStakeTokenChange,
+  onShowNotOwnedChange,
   onDurationCapChange,
   onPlayerSelectionChange
 }: SidebarProps) => {
@@ -218,6 +222,14 @@ const Sidebar = memo(({
                         </option>
                       ))}
                     </select>
+                    <LayerOption style={{ fontSize: '11px', marginTop: '8px', color: '#bbb' }}>
+                      <CompactCheckbox 
+                        type="checkbox"
+                        checked={showNotOwned}
+                        onChange={(e) => onShowNotOwnedChange(e.target.checked)}
+                      />
+                      Show lands NOT using this token
+                    </LayerOption>
                   </ControlGroup>
                 )}
 
