@@ -21,6 +21,12 @@ export const normalizeTokenAddress = (address?: string | null): string => {
   return `0x${normalizedBody}`;
 };
 
+export const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
+
+export const isZeroAddress = (address?: string | null): boolean => {
+  return normalizeTokenAddress(address) === '0x0';
+};
+
 const COMPACT_SUFFIXES = ['','K','M','B','T'];
 
 export const formatCompactNumber = (value: number, decimals = 1): string => {

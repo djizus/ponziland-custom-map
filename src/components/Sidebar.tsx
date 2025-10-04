@@ -8,6 +8,7 @@ import {
   BASE_TOKEN_SYMBOL,
   normalizeTokenAddress,
   formatTokenAmount,
+  isZeroAddress,
 } from '../utils/formatting';
 import { getTokenMetadata } from '../data/tokenMetadata';
 import { calculateAuctionPrice, getElapsedSeconds } from '../utils/auctionUtils';
@@ -266,6 +267,33 @@ const Sidebar = memo(({
       isSelected: selectedPlayerAddresses.has(player.address)
     }))
   , [allPlayers, selectedPlayerAddresses]);
+
+  const tileOwnerDisplay = useMemo(() => {
+    if (!selectedTileData) {
+      return '';
+    }
+
+    if (selectedTileData.auction) {
+      return 'AUCTION';
+    }
+
+    const land = selectedTileData.land;
+    if (!land) {
+      return 'Empty';
+    }
+
+    const owner = land.owner;
+    if (!owner) {
+      return 'Unowned';
+    }
+
+    if (isZeroAddress(owner)) {
+      return 'Auctions';
+    }
+
+    const cacheKey = owner.toLowerCase();
+    return usernameCache[cacheKey] || `${owner.slice(0, 4)}...${owner.slice(-3)}`;
+  }, [selectedTileData, usernameCache]);
 
   // Memoize event handlers for hover effects
   const handleMouseEnter = useCallback((e: React.MouseEvent<HTMLAnchorElement>) => {
@@ -544,11 +572,7 @@ const Sidebar = memo(({
                         Location {selectedTileData.location} {selectedTileData.coords} - Level {selectedTileData.land ? getLevelNumber(selectedTileData.land.level) : 'N/A'}
                       </TileTitle>
                       <TileSubtitle>
-                        {selectedTileData.auction ? "AUCTION" : 
-                          (selectedTileData.land?.owner ? 
-                            `${(usernameCache[selectedTileData.land.owner.toLowerCase()] || selectedTileData.land.owner.slice(0,4)+"..."+selectedTileData.land.owner.slice(-3))}` : 
-                            (selectedTileData.land ? "Unowned" : "Empty")
-                          )}
+                        {tileOwnerDisplay}
                       </TileSubtitle>
                       {selectedTileData.isMyLand && (
                         <div style={{ color: 'gold', fontWeight: 'bold', marginTop: '4px', fontSize: '11px' }}>

@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { PonziLand } from '../types/ponziland';
 import { logError } from '../utils/errorHandler';
 import { apiClient } from '../utils/apiClient';
+import { isZeroAddress, ZERO_ADDRESS } from '../utils/formatting';
 
 export const usePlayerManagement = (
   gridData: { tiles: (PonziLand | null)[] },
@@ -15,7 +16,8 @@ export const usePlayerManagement = (
     const addresses = new Set<string>();
     gridData.tiles.forEach(tile => {
       if (tile?.owner) {
-        addresses.add(tile.owner);
+        const normalizedOwner = isZeroAddress(tile.owner) ? ZERO_ADDRESS : tile.owner;
+        addresses.add(normalizedOwner);
       }
     });
     return addresses;
@@ -30,7 +32,8 @@ export const usePlayerManagement = (
     const addressesToFetchUsernamesFor: string[] = [];
     
     ownerAddresses.forEach(mapOwnerAddr => {
-      if (!usernameCache[mapOwnerAddr.toLowerCase()]) {
+      const addrKey = mapOwnerAddr.toLowerCase();
+      if (!isZeroAddress(mapOwnerAddr) && !usernameCache[addrKey]) {
         addressesToFetchUsernamesFor.push(mapOwnerAddr);
       }
     });
@@ -62,13 +65,19 @@ export const usePlayerManagement = (
 
     const uniqueOwnerEntriesForPlayerList = new Map<string, { address: string; displayName: string; originalAddress: string }>();
     ownerAddresses.forEach(mapOwnerAddr => {
-      const addrKey = mapOwnerAddr.toLowerCase();
+      const isAuctionAddress = isZeroAddress(mapOwnerAddr);
+      const addrKey = isAuctionAddress
+        ? ZERO_ADDRESS.toLowerCase()
+        : mapOwnerAddr.toLowerCase();
       const username = usernameCache[addrKey];
+
       if (!uniqueOwnerEntriesForPlayerList.has(addrKey)) {
-          uniqueOwnerEntriesForPlayerList.set(addrKey, {
-            address: addrKey,
-            originalAddress: mapOwnerAddr, 
-            displayName: username || `${mapOwnerAddr.slice(0,6)}...${mapOwnerAddr.slice(-4)}`
+        uniqueOwnerEntriesForPlayerList.set(addrKey, {
+          address: addrKey,
+          originalAddress: mapOwnerAddr,
+          displayName: isAuctionAddress
+            ? 'Auctions'
+            : (username || `${mapOwnerAddr.slice(0,6)}...${mapOwnerAddr.slice(-4)}`)
         });
       }
     });
