@@ -1,60 +1,115 @@
 import { useState, useEffect, useMemo } from 'react';
-import { PonziLand, PonziLandAuction, PonziLandStake, TokenPrice } from '../types/ponziland';
+import { PonziLand, PonziLandAuction, PonziLandStake, PonziLandConfig, TokenPrice } from '../types/ponziland';
 import { GRID_SIZE } from '../constants/ponziland';
-import { processGridData, getNeighborLocations } from '../utils/dataProcessing';
+import {
+  processGridData,
+  getNeighborLocations,
+  getCoordinates,
+  normalizeLocation,
+} from '../utils/dataProcessing';
 import { performanceCache } from '../utils/performanceCache';
 import { compareLandArrays } from '../utils/smartDiff';
+import { BASE_TOKEN_SYMBOL, normalizeTokenAddress, type TokenInfo } from '../utils/formatting';
+import { getTokenMetadata, listTokenMetadata } from '../data/tokenMetadata';
 
 export const useGameData = (
   landsSqlData: PonziLand[],
   auctionsSqlData: PonziLandAuction[],
   stakesSqlData: PonziLandStake[],
   prices: TokenPrice[],
-  loadingSql: boolean
+  loadingSql: boolean,
+  configSqlData: PonziLandConfig | null
 ) => {
   const [gridData, setGridData] = useState<{
     tiles: (PonziLand | null)[];
     activeRows: number[];
     activeCols: number[];
-  }>({ tiles: [], activeRows: [], activeCols: [] });
+    activeLocations: number[];
+  }>({ tiles: [], activeRows: [], activeCols: [], activeLocations: [] });
   
   const [activeAuctions, setActiveAuctions] = useState<Record<number, PonziLandAuction>>({});
 
   // Performance optimization: Create token info cache to avoid repeated lookups
   const tokenInfoCache = useMemo(() => {
-    const cache = new Map<string, { symbol: string; ratio: number | null }>();
+    const cache = new Map<string, TokenInfo>();
     prices.forEach(token => {
-      cache.set(token.address.toLowerCase(), { symbol: token.symbol, ratio: token.ratio });
+      if (!token?.address) {
+        return;
+      }
+
+      const normalizedAddress = normalizeTokenAddress(token.address);
+      const metadata = getTokenMetadata(token.address);
+      const value: TokenInfo = {
+        symbol: token.symbol,
+        ratio: token.ratio ?? null,
+        decimals: metadata?.decimals ?? 18,
+      };
+
+      cache.set(normalizedAddress, value);
+
+      const lowerAddress = token.address.toLowerCase();
+      if (lowerAddress !== normalizedAddress) {
+        cache.set(lowerAddress, value);
+      }
     });
-    // Add default entry for empty token_used
-    cache.set('', { symbol: 'nftSTRK', ratio: null });
+
+    // Ensure metadata-only tokens exist even if price feed missing
+    listTokenMetadata().forEach(meta => {
+      const normalizedAddress = normalizeTokenAddress(meta.address);
+      if (!cache.has(normalizedAddress)) {
+        const info: TokenInfo = {
+          symbol: meta.symbol,
+          ratio: null,
+          decimals: meta.decimals,
+        };
+        cache.set(normalizedAddress, info);
+        cache.set(meta.address.toLowerCase(), info);
+      }
+    });
+
+    // Add default entries for base STRK token
+    cache.set('', { symbol: BASE_TOKEN_SYMBOL, ratio: 1, decimals: 18 });
+    cache.set('0x0', { symbol: BASE_TOKEN_SYMBOL, ratio: 1, decimals: 18 });
+    cache.set('0', { symbol: BASE_TOKEN_SYMBOL, ratio: 1, decimals: 18 });
     return cache;
   }, [prices]);
 
   // Performance optimization: Create neighbor location cache
   const neighborCache = useMemo(() => {
     const cache = new Map<number, number[]>();
-    if (gridData.activeRows.length > 0 && gridData.activeCols.length > 0) {
-      gridData.activeRows.forEach(row => {
-        gridData.activeCols.forEach(col => {
-          const location = row * GRID_SIZE + col;
-          cache.set(location, getNeighborLocations(location));
-        });
-      });
-    }
+    gridData.activeLocations.forEach(location => {
+      cache.set(location, getNeighborLocations(location));
+    });
+    Object.keys(activeAuctions).forEach(key => {
+      const location = Number(key);
+      if (!cache.has(location)) {
+        cache.set(location, getNeighborLocations(location));
+      }
+    });
     return cache;
-  }, [gridData.activeRows, gridData.activeCols]);
+  }, [gridData.activeLocations, activeAuctions]);
 
   // Performance optimization: Pre-calculate all tile locations to avoid nested maps
   const activeTileLocations = useMemo(() => {
-    const locations: Array<{ row: number; col: number; location: number }> = [];
-    gridData.activeRows.forEach(row => {
-      gridData.activeCols.forEach(col => {
-        locations.push({ row, col, location: row * GRID_SIZE + col });
-      });
+    const uniqueLocations = new Set<number>(gridData.activeLocations);
+    Object.keys(activeAuctions).forEach(key => {
+      const normalized = normalizeLocation(Number(key));
+      if (normalized !== null) {
+        uniqueLocations.add(normalized);
+      }
     });
-    return locations;
-  }, [gridData.activeRows, gridData.activeCols]);
+
+    const entries: Array<{ row: number; col: number; location: number }> = [];
+    uniqueLocations.forEach(location => {
+      const [col, row] = getCoordinates(location);
+      entries.push({ row, col, location });
+    });
+
+    return entries.sort((a, b) => {
+      if (a.row === b.row) return a.col - b.col;
+      return a.row - b.row;
+    });
+  }, [gridData.activeLocations, activeAuctions]);
 
   // Process grid data when SQL data changes
   useEffect(() => {
@@ -70,7 +125,12 @@ export const useGameData = (
         return prevGridData;
       });
     } else if (!loadingSql && landsSqlData && landsSqlData.length === 0) {
-       setGridData({ tiles: Array(GRID_SIZE * GRID_SIZE).fill(null), activeRows: [], activeCols: [] });
+      setGridData({
+        tiles: Array(GRID_SIZE * GRID_SIZE).fill(null),
+        activeRows: [],
+        activeCols: [],
+        activeLocations: [],
+      });
     }
   }, [landsSqlData, stakesSqlData, loadingSql]);
 
@@ -80,13 +140,22 @@ export const useGameData = (
       const filteredAuctions = auctionsSqlData
         .filter((auction: PonziLandAuction) => !auction.is_finished)
         .reduce((acc: Record<number, PonziLandAuction>, auction: PonziLandAuction) => {
-          acc[Number(auction.land_location)] = auction;
+          const normalizedAuction =
+            configSqlData?.decay_rate !== undefined &&
+            configSqlData.decay_rate !== null &&
+            (auction.decay_rate === undefined || auction.decay_rate === null)
+              ? { ...auction, decay_rate: String(configSqlData.decay_rate) }
+              : auction;
+          const normalizedLocation = normalizeLocation(auction.land_location);
+          if (normalizedLocation !== null) {
+            acc[normalizedLocation] = normalizedAuction;
+          }
           return acc;
         }, {});
       setActiveAuctions(filteredAuctions);
       performanceCache.updateAuctionsVersion();
     }
-  }, [auctionsSqlData]);
+  }, [auctionsSqlData, configSqlData?.decay_rate]);
 
   return {
     gridData,

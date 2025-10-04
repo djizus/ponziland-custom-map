@@ -7,10 +7,14 @@ export default defineConfig({
   server: {
     proxy: {
       '/api/price': {
-        target: 'https://api.ponzi.land',
+        target: 'https://api.runelabs.xyz',
         changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api/, ''),
-        secure: false
+        rewrite: () => '/ponziland-mainnet/api//price',
+        secure: false,
+        headers: {
+          Referer: 'https://play.ponzi.land/',
+          'User-Agent': 'PonzilandMapDevProxy/1.0'
+        }
       },
       '/api/usernames': {
         target: 'https://socialink.ponzi.land', // Target Socialink API

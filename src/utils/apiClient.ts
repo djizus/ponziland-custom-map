@@ -2,12 +2,14 @@
  * Enhanced API client with request deduplication, caching, and proper error handling
  */
 
-import { TokenPrice, PonziLand, PonziLandAuction, PonziLandStake } from '../types/ponziland';
+import { TokenPrice, PonziLand, PonziLandAuction, PonziLandStake, PonziLandConfig } from '../types/ponziland';
 import { 
   SQL_API_URL, 
   SQL_GET_PONZI_LANDS, 
   SQL_GET_PONZI_LAND_AUCTIONS,
-  SQL_GET_PONZI_LANDS_STAKE 
+  SQL_GET_PONZI_LANDS_STAKE,
+  SQL_GET_PONZI_CONFIG,
+  PRICE_API_URL 
 } from '../constants/ponziland';
 import { deduplicatedFetch, batchRequestManager } from './requestDeduplicator';
 import { logError, handleApiError } from './errorHandler';
@@ -34,16 +36,18 @@ export class ApiClient {
    */
   async fetchPrices(signal?: AbortSignal): Promise<TokenPrice[]> {
     try {
-      const options: RequestInit = signal ? { signal } : {};
-      
+      const options: RequestInit = {
+        method: 'GET',
+        headers: { Accept: 'application/json' },
+        mode: 'cors',
+        cache: 'no-store',
+        ...(signal && { signal })
+      };
+
       if (this.config.enableDeduplication) {
-        return await deduplicatedFetch<TokenPrice[]>(
-          '/api/price',
-          options,
-          this.config.defaultTtl
-        );
+        return await deduplicatedFetch<TokenPrice[]>(PRICE_API_URL, options, this.config.defaultTtl);
       } else {
-        const response = await fetch('/api/price', options);
+        const response = await fetch(PRICE_API_URL, options);
         if (!response.ok) {
           const error = await handleApiError(response, 'PRICE_FETCH');
           throw new Error(error.message);
@@ -70,6 +74,7 @@ export class ApiClient {
     lands: PonziLand[];
     auctions: PonziLandAuction[];
     stakes: PonziLandStake[];
+    config: PonziLandConfig | null;
   }> {
     try {
       const options: RequestInit = {
@@ -82,7 +87,8 @@ export class ApiClient {
       const queries = [
         { name: 'lands', query: SQL_GET_PONZI_LANDS },
         { name: 'auctions', query: SQL_GET_PONZI_LAND_AUCTIONS },
-        { name: 'stakes', query: SQL_GET_PONZI_LANDS_STAKE }
+        { name: 'stakes', query: SQL_GET_PONZI_LANDS_STAKE },
+        { name: 'config', query: SQL_GET_PONZI_CONFIG }
       ];
 
       const results = await Promise.all(
@@ -94,7 +100,8 @@ export class ApiClient {
       return {
         lands: results[0] as PonziLand[],
         auctions: results[1] as PonziLandAuction[],
-        stakes: results[2] as PonziLandStake[]
+        stakes: results[2] as PonziLandStake[],
+        config: ((results[3] as PonziLandConfig[]) || [])[0] || null
       };
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') {

@@ -1,4 +1,4 @@
-import { PonziLand, PonziLandAuction } from '../types/ponziland';
+import { PonziLand, PonziLandAuction, PonziLandConfig } from '../types/ponziland';
 import { GRID_SIZE } from '../constants/ponziland';
 import { 
   getTaxRateCached, 
@@ -6,7 +6,7 @@ import {
   calculateTimeRemainingHours,
   calculateTotalYieldInfoCached 
 } from './taxCalculations';
-import { getTokenInfoCached, convertToESTRK, hexToDecimal, displayCoordinates } from './formatting';
+import { getTokenInfoCached, convertToSTRK, hexToDecimal, displayCoordinates, type TokenInfo } from './formatting';
 import { logError } from './errorHandler';
 
 // Core calculation interfaces
@@ -20,6 +20,7 @@ export interface NeighborCalculationResult {
   timeRemaining: number;
   symbol: string;
   ratio: number | null;
+  decimals: number;
 }
 
 export interface YieldCalculationResult {
@@ -34,9 +35,10 @@ export interface LandCalculationContext {
   location: number;
   land: PonziLand | null;
   gridData: { tiles: (PonziLand | null)[] };
-  tokenInfoCache: Map<string, { symbol: string; ratio: number | null }>;
+  tokenInfoCache: Map<string, TokenInfo>;
   neighborCache: Map<number, number[]>;
   activeAuctions: Record<number, PonziLandAuction>;
+  config: PonziLandConfig | null;
 }
 
 /**
@@ -50,17 +52,17 @@ export class CalculationEngine {
    * This replaces the repeated neighbor iteration logic
    */
   static calculateNeighborDetails(context: LandCalculationContext): NeighborCalculationResult[] {
-    const { location, neighborCache, gridData, tokenInfoCache, activeAuctions } = context;
+    const { location, neighborCache, gridData, tokenInfoCache, activeAuctions, config } = context;
     const neighbors = neighborCache.get(location) || [];
     const results: NeighborCalculationResult[] = [];
 
     neighbors.forEach(neighborLoc => {
       const neighbor = gridData.tiles[neighborLoc];
       if (neighbor && !activeAuctions[neighborLoc] && neighbor.owner && neighbor.sell_price) {
-        const { symbol, ratio } = getTokenInfoCached(neighbor.token_used, tokenInfoCache);
-        const priceESTRK = convertToESTRK(neighbor.sell_price, symbol, ratio);
-        const taxRate = getTaxRateCached(neighbor.level, Number(neighbor.location), neighborCache);
-        const burnRate = calculateBurnRate(neighbor, gridData.tiles, activeAuctions);
+        const { symbol, ratio, decimals } = getTokenInfoCached(neighbor.token_used, tokenInfoCache);
+        const priceESTRK = convertToSTRK(neighbor.sell_price, symbol, ratio, decimals);
+        const taxRate = getTaxRateCached(neighbor.level, Number(neighbor.location), neighborCache, config);
+        const burnRate = calculateBurnRate(neighbor, gridData.tiles, activeAuctions, tokenInfoCache, neighborCache, config);
         const timeRemaining = calculateTimeRemainingHours(neighbor, burnRate);
         
         results.push({
@@ -72,7 +74,8 @@ export class CalculationEngine {
           burnRate,
           timeRemaining,
           symbol,
-          ratio
+          ratio,
+          decimals,
         });
       }
     });
@@ -89,7 +92,7 @@ export class CalculationEngine {
     auctionPrice: number,
     myTimeRemaining: number = 48
   ): YieldCalculationResult {
-    const { location, land, neighborCache } = context;
+    const { location, land, neighborCache, config } = context;
     
     if (!land) {
       return {
@@ -102,7 +105,7 @@ export class CalculationEngine {
     }
 
     const neighborDetails = this.calculateNeighborDetails(context);
-    const myTaxRate = getTaxRateCached(land.level, location, neighborCache);
+    const myTaxRate = getTaxRateCached(land.level, location, neighborCache, config);
     
     // Calculate hourly rates
     let taxReceived = 0;
@@ -149,7 +152,7 @@ export class CalculationEngine {
    * Consolidates regular yield calculation logic
    */
   static calculateLandYield(context: LandCalculationContext): YieldCalculationResult {
-    const { location, land, gridData, tokenInfoCache, neighborCache, activeAuctions } = context;
+    const { location, land, gridData, tokenInfoCache, neighborCache, activeAuctions, config } = context;
     
     if (!land) {
       return {
@@ -162,7 +165,15 @@ export class CalculationEngine {
     }
 
     // Use existing cached calculation for regular lands
-    const yieldInfo = calculateTotalYieldInfoCached(location, gridData.tiles, tokenInfoCache, neighborCache, activeAuctions);
+    const yieldInfo = calculateTotalYieldInfoCached(
+      location,
+      gridData.tiles,
+      tokenInfoCache,
+      neighborCache,
+      activeAuctions,
+      12,
+      config
+    );
     const neighborDetails = this.calculateNeighborDetails(context);
     
     return {
@@ -181,9 +192,10 @@ export class CalculationEngine {
   static calculatePortfolioMetrics(
     lands: PonziLand[],
     gridData: { tiles: (PonziLand | null)[] },
-    tokenInfoCache: Map<string, { symbol: string; ratio: number | null }>,
+    tokenInfoCache: Map<string, TokenInfo>,
     neighborCache: Map<number, number[]>,
-    activeAuctions: Record<number, PonziLandAuction>
+    activeAuctions: Record<number, PonziLandAuction>,
+    config: PonziLandConfig | null
   ) {
     let totalYieldPerHour = 0;
     let totalTaxesPerHour = 0;
@@ -207,37 +219,42 @@ export class CalculationEngine {
       try {
         const location = parseInt(land.location);
         const token = tokenInfoCache.get(land.token_used);
-        const ratio = token?.ratio || null;
-        
-        if (!token) return;
 
-        const effectiveRatio = ratio || 1;
+        if (!token) return;
         const context: LandCalculationContext = {
           location,
           land,
           gridData,
           tokenInfoCache,
           neighborCache,
-          activeAuctions
+          activeAuctions,
+          config
         };
 
         const yieldInfo = this.calculateLandYield(context);
-        const burnRate = calculateBurnRate(land, gridData.tiles, activeAuctions);
-        const landPriceESTRK = convertToESTRK(land.sell_price, token.symbol, effectiveRatio);
+        const burnRate = calculateBurnRate(land, gridData.tiles, activeAuctions, tokenInfoCache, neighborCache, context.config);
+        const landPriceSTRK = convertToSTRK(
+          land.sell_price,
+          token.symbol,
+          token.ratio,
+          token.decimals,
+        );
         
         totalYieldPerHour += yieldInfo.yieldPerHour || 0;
         
         // Calculate taxes using consolidated logic
-        const myTaxRate = getTaxRateCached(land.level || 'zero', location, neighborCache);
-        const hourlyTax = landPriceESTRK * myTaxRate;
+        const myTaxRate = getTaxRateCached(land.level || 'zero', location, neighborCache, context.config);
+        const hourlyTax = landPriceSTRK * myTaxRate;
         totalTaxesPerHour += hourlyTax || 0;
         
-        totalStaked += hexToDecimal(land.staked_amount || '0x0');
+        totalStaked += hexToDecimal(land.staked_amount || '0x0', token.decimals);
         totalBurnRate += burnRate;
-        totalLandValue += landPriceESTRK;
+        totalLandValue += landPriceSTRK;
 
         // Time-based calculations
-        const timeRemaining = burnRate > 0 ? hexToDecimal(land.staked_amount || '0x0') / burnRate : Infinity;
+        const timeRemaining = burnRate > 0
+          ? hexToDecimal(land.staked_amount || '0x0', token.decimals) / burnRate
+          : Infinity;
         if (timeRemaining <= 2) {
           nukableCount++;
           const row = Math.floor(location / GRID_SIZE);
@@ -246,7 +263,7 @@ export class CalculationEngine {
             location,
             coordinates: displayCoordinates(col, row),
             timeRemaining,
-            landValue: landPriceESTRK,
+            landValue: landPriceSTRK,
             symbol: token.symbol
           });
         } else if (timeRemaining <= 4) {
@@ -335,7 +352,7 @@ export class CalculationEngine {
     }
 
     const neighborDetails = this.calculateNeighborDetails(context);
-    const price = currentPrice || (land.sell_price ? convertToESTRK(land.sell_price, 'nftSTRK', 1) : 0);
+    const price = currentPrice || (land.sell_price ? convertToSTRK(land.sell_price, 'STRK', 1, 18) : 0);
     
     // Calculate tax received (from neighbors)
     const taxReceivedPerHour = neighborDetails.reduce((total, neighbor) => total + neighbor.hourlyTax, 0);
@@ -363,9 +380,10 @@ export class CalculationEngine {
   static batchCalculateMetrics(
     locations: number[],
     gridData: { tiles: (PonziLand | null)[] },
-    tokenInfoCache: Map<string, { symbol: string; ratio: number | null }>,
+    tokenInfoCache: Map<string, TokenInfo>,
     neighborCache: Map<number, number[]>,
-    activeAuctions: Record<number, PonziLandAuction>
+    activeAuctions: Record<number, PonziLandAuction>,
+    config: PonziLandConfig | null = null
   ): Map<number, YieldCalculationResult> {
     const results = new Map<number, YieldCalculationResult>();
     
@@ -378,7 +396,8 @@ export class CalculationEngine {
           gridData,
           tokenInfoCache,
           neighborCache,
-          activeAuctions
+          activeAuctions,
+          config
         };
         
         results.set(location, this.calculateLandYield(context));

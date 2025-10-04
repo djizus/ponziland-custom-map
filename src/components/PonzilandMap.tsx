@@ -17,6 +17,7 @@ import ErrorBoundary from './ErrorBoundary';
 import { MapWrapper, GridWrapper } from './PonzilandMap/styles/MapStyles';
 
 import { safeLocalStorage } from '../utils/errorHandler';
+import { normalizeTokenAddress } from '../utils/formatting';
 
 // Move utility function outside component to avoid recreation
 const loadPersistedState = <T,>(key: string, defaultValue: T): T => {
@@ -29,11 +30,16 @@ const PonzilandMap = () => {
   const [zoom] = useState(1);
 
   // Use data fetching hook
-  const { prices, landsSqlData, auctionsSqlData, stakesSqlData, loadingSql, errorSql } = useDataFetching();
+  const { prices, landsSqlData, auctionsSqlData, stakesSqlData, configSqlData, loadingSql, errorSql } = useDataFetching();
 
   // Use game data processing hook
   const { gridData, activeAuctions, tokenInfoCache, neighborCache, activeTileLocations } = useGameData(
-    landsSqlData, auctionsSqlData, stakesSqlData, prices, loadingSql
+    landsSqlData,
+    auctionsSqlData,
+    stakesSqlData,
+    prices,
+    loadingSql,
+    configSqlData
   );
 
   // Use player management hook
@@ -57,25 +63,28 @@ const PonzilandMap = () => {
   );
   
   const [selectedToken, setSelectedToken] = useState<string>(
-    () => loadPersistedState<string>('ponziland-selected-token', '')
+    () => normalizeTokenAddress(loadPersistedState<string>('ponziland-selected-token', ''))
   );
 
-  // Auto-select nftSTRK when tokens are loaded and no token is selected
+  // Auto-select STRK when tokens are loaded and no token is selected
   useEffect(() => {
     if (!selectedToken && prices.length > 0) {
-      const nftSTRKToken = prices.find(token => token.symbol === 'nftSTRK');
-      if (nftSTRKToken) {
-        setSelectedToken(nftSTRKToken.address);
+      const STRKToken = prices.find(token => token.symbol === 'STRK');
+      if (STRKToken) {
+        setSelectedToken(normalizeTokenAddress(STRKToken.address));
       }
     }
   }, [selectedToken, prices]);
   
   const [durationCapHours, setDurationCapHours] = useState(
-    () => loadPersistedState<number>('ponziland-duration-cap', 24)
+    () => {
+      const persisted = loadPersistedState<number>('ponziland-duration-cap', 24);
+      return Math.min(48, Math.max(2, persisted));
+    }
   );
 
   const [selectedStakeToken, setSelectedStakeToken] = useState<string>(
-    () => loadPersistedState<string>('ponziland-stake-token', '')
+    () => normalizeTokenAddress(loadPersistedState<string>('ponziland-stake-token', ''))
   );
 
   const [showNotOwned, setShowNotOwned] = useState<boolean>(
@@ -91,7 +100,8 @@ const PonzilandMap = () => {
     neighborCache,
     activeTileLocations,
     prices,
-    durationCapHours
+    durationCapHours,
+    configSqlData
   );
 
   // Use persistence hook (sidebar always visible now)
@@ -120,6 +130,11 @@ const PonzilandMap = () => {
       }
       return newSelected;
     });
+  }, []);
+
+  const handleDurationCapChange = useCallback((hours: number) => {
+    const clamped = Math.min(48, Math.max(2, hours));
+    setDurationCapHours(clamped);
   }, []);
 
   // Set document title
@@ -174,12 +189,13 @@ const PonzilandMap = () => {
         usernameCache={usernameCache}
         loadingSql={loadingSql}
         playerStats={playerStats}
+        config={configSqlData}
         onTabChange={handleTabChange}
         onLayerChange={setSelectedLayer}
         onTokenChange={setSelectedToken}
         onStakeTokenChange={setSelectedStakeToken}
         onShowNotOwnedChange={setShowNotOwned}
-        onDurationCapChange={setDurationCapHours}
+        onDurationCapChange={handleDurationCapChange}
         onPlayerSelectionChange={handlePlayerSelectionChange}
         />
       </ErrorBoundary>
@@ -200,6 +216,7 @@ const PonzilandMap = () => {
           hideNotRecommended={selectedLayer === 'yield'}
           durationCapHours={durationCapHours}
           zoom={zoom}
+          config={configSqlData}
           onTileClick={handleTileClick}
           />
         </ErrorBoundary>

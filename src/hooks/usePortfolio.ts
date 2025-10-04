@@ -1,13 +1,15 @@
 import { useMemo } from 'react';
-import { PonziLand } from '../types/ponziland';
+import { PonziLand, PonziLandConfig } from '../types/ponziland';
 import { CalculationEngine } from '../utils/calculationEngine';
+import type { TokenInfo } from '../utils/formatting';
 
 export const usePortfolio = (
   selectedPlayerAddresses: Set<string>,
   gridData: { tiles: (PonziLand | null)[] },
-  tokenInfoCache: Map<string, { symbol: string; ratio: number | null }>,
+  tokenInfoCache: Map<string, TokenInfo>,
   neighborCache: Map<number, number[]>,
-  activeAuctions: Record<number, any>
+  activeAuctions: Record<number, any>,
+  config: PonziLandConfig | null
 ) => {
   return useMemo(() => {
     if (selectedPlayerAddresses.size === 0) return null;
@@ -28,7 +30,8 @@ export const usePortfolio = (
       gridData,
       tokenInfoCache,
       neighborCache,
-      activeAuctions
+      activeAuctions,
+      config
     );
 
     return {
@@ -36,5 +39,5 @@ export const usePortfolio = (
       portfolioLands,
       criticalLands: portfolioMetrics.criticalLands
     };
-  }, [selectedPlayerAddresses, gridData.tiles, tokenInfoCache, neighborCache, activeAuctions]);
+  }, [selectedPlayerAddresses, gridData.tiles, tokenInfoCache, neighborCache, activeAuctions, config]);
 };

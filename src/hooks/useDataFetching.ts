@@ -1,5 +1,5 @@
-import { useState, useCallback, useMemo } from 'react';
-import { PonziLand, PonziLandAuction, PonziLandStake, TokenPrice } from '../types/ponziland';
+import { useState, useCallback, useMemo, useRef } from 'react';
+import { PonziLand, PonziLandAuction, PonziLandStake, PonziLandConfig, TokenPrice } from '../types/ponziland';
 import { performanceCache } from '../utils/performanceCache';
 import { comparePricesArrays } from '../utils/smartDiff';
 import { logError } from '../utils/errorHandler';
@@ -11,8 +11,10 @@ export const useDataFetching = () => {
   const [landsSqlData, setLandsSqlData] = useState<PonziLand[]>([]);
   const [auctionsSqlData, setAuctionsSqlData] = useState<PonziLandAuction[]>([]);
   const [stakesSqlData, setStakesSqlData] = useState<PonziLandStake[]>([]);
+  const [configSqlData, setConfigSqlData] = useState<PonziLandConfig | null>(null);
   const [loadingSql, setLoadingSql] = useState(true);
   const [errorSql, setErrorSql] = useState<string>('');
+  const configSignatureRef = useRef<string | null>(null);
 
   // Price fetching with adaptive polling
   const fetchPrices = useCallback(async () => {
@@ -44,11 +46,20 @@ export const useDataFetching = () => {
       // Clear error on any attempt (not just initial)
       setErrorSql('');
 
-      const { lands, auctions, stakes } = await apiClient.fetchSqlData();
-      
+      const { lands, auctions, stakes, config } = await apiClient.fetchSqlData();
+
       setLandsSqlData(lands || []);
       setAuctionsSqlData(auctions || []);
       setStakesSqlData(stakes || []);
+
+      const nextConfig = config || null;
+      setConfigSqlData(nextConfig);
+
+      const signature = nextConfig ? JSON.stringify(nextConfig) : 'null';
+      if (configSignatureRef.current !== signature) {
+        performanceCache.updateConfigVersion();
+        configSignatureRef.current = signature;
+      }
       
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') {
@@ -95,6 +106,7 @@ export const useDataFetching = () => {
     landsSqlData,
     auctionsSqlData,
     stakesSqlData,
+    configSqlData,
     loadingSql,
     errorSql
   };

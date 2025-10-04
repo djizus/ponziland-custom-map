@@ -14,7 +14,8 @@ export class PerformanceCache {
     lands: 0,
     auctions: 0,
     stakes: 0,
-    prices: 0
+    prices: 0,
+    config: 0
   };
   
   private constructor() {}
@@ -28,23 +29,23 @@ export class PerformanceCache {
   
   // Generate cache keys
   private getTaxRateKey(level: string, location: number): string {
-    return `tax_${level}_${location}`;
+    return `tax_${level}_${location}_${this.dataVersions.config}`;
   }
-  
+
   private getBurnRateKey(location: number, landsVersion: number, auctionsVersion: number): string {
-    return `burn_${location}_${landsVersion}_${auctionsVersion}`;
+    return `burn_${location}_${landsVersion}_${auctionsVersion}_${this.dataVersions.config}`;
   }
-  
+
   private getTimeRemainingKey(location: number, landsVersion: number, auctionsVersion: number): string {
-    return `time_${location}_${landsVersion}_${auctionsVersion}`;
+    return `time_${location}_${landsVersion}_${auctionsVersion}_${this.dataVersions.config}`;
   }
-  
+
   private getNeighborYieldKey(location: number, constrainToMyDuration: boolean, myTimeRemaining: number | undefined, durationCapHours: number): string {
-    return `neighbor_v2_${location}_${constrainToMyDuration}_${myTimeRemaining || 0}_${durationCapHours}_${this.dataVersions.lands}_${this.dataVersions.auctions}_${this.dataVersions.prices}`;
+    return `neighbor_v2_${location}_${constrainToMyDuration}_${myTimeRemaining || 0}_${durationCapHours}_${this.dataVersions.lands}_${this.dataVersions.auctions}_${this.dataVersions.prices}_${this.dataVersions.config}`;
   }
-  
+
   private getPurchaseRecommendationKey(location: number, currentAuctionPrice: number | undefined, durationCapHours: number): string {
-    return `purchase_v2_${location}_${currentAuctionPrice || 0}_${durationCapHours}_${this.dataVersions.lands}_${this.dataVersions.auctions}_${this.dataVersions.prices}`;
+    return `purchase_v2_${location}_${currentAuctionPrice || 0}_${durationCapHours}_${this.dataVersions.lands}_${this.dataVersions.auctions}_${this.dataVersions.prices}_${this.dataVersions.config}`;
   }
   
   // Tax rate caching
@@ -138,9 +139,17 @@ export class PerformanceCache {
     this.dataVersions.prices++;
     this.invalidateRelatedCaches(['neighbor', 'purchase']);
   }
+
+  public updateConfigVersion(): void {
+    this.dataVersions.config++;
+    this.invalidateRelatedCaches(['tax', 'burn', 'time', 'neighbor', 'purchase']);
+  }
   
   // Selective cache invalidation
   private invalidateRelatedCaches(cacheTypes: string[]): void {
+    if (cacheTypes.includes('tax')) {
+      this.taxRateCache.clear();
+    }
     if (cacheTypes.includes('burn')) {
       this.burnRateCache.clear();
     }

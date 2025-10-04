@@ -1,20 +1,21 @@
 import { memo, useMemo, useCallback } from 'react';
-import { PonziLand, PonziLandAuction, SelectedTileDetails, YieldInfo, MapLayer } from '../types/ponziland';
-import { 
+import { PonziLand, PonziLandAuction, SelectedTileDetails, PonziLandConfig, YieldInfo, MapLayer } from '../types/ponziland';
+import {
   getTokenInfoCached,
-  formatOriginalPrice, 
-  calculateESTRKPrice, 
-  displayCoordinates, 
-  hexToDecimal, 
-  formatTimeRemaining, 
-  convertToESTRK 
+  formatOriginalPrice,
+  hexToDecimal,
+  displayCoordinates,
+  formatTimeRemaining,
+  convertToSTRK,
+  formatStrkAmount,
+  normalizeTokenAddress,
+  type TokenInfo,
 } from '../utils/formatting';
 import { getLevelNumber } from '../utils/dataProcessing';
 import { 
   calculateTaxInfoCached,
   calculateROI, 
   calculateBurnRate, 
-  isNukable, 
   calculateTotalYieldInfoCached,
   calculatePurchaseRecommendation 
 } from '../utils/taxCalculations';
@@ -39,7 +40,8 @@ const useAuctionCalculations = (
   neighborCache: Map<number, number[]>,
   gridData: any,
   activeAuctions: Record<number, PonziLandAuction>,
-  tokenInfoCache: Map<string, { symbol: string; ratio: number | null }>
+  tokenInfoCache: Map<string, TokenInfo>,
+  config: PonziLandConfig | null
 ) => {
   return useMemo(() => {
     if (!auction || !land) {
@@ -60,7 +62,8 @@ const useAuctionCalculations = (
       gridData,
       tokenInfoCache,
       neighborCache,
-      activeAuctions
+      activeAuctions,
+      config
     };
 
     // Use consolidated calculation engine
@@ -82,7 +85,7 @@ const useAuctionCalculations = (
       currentAuctionPriceForTileDisplay,
       potentialYieldAuction
     };
-  }, [auction, land, location, neighborCache, gridData.tiles, activeAuctions, tokenInfoCache]);
+  }, [auction, land, location, neighborCache, gridData.tiles, activeAuctions, tokenInfoCache, config]);
 };
 
 interface TileComponentProps {
@@ -92,7 +95,7 @@ interface TileComponentProps {
   land: PonziLand | null;
   auction: PonziLandAuction | null;
   isHighlighted: boolean;
-  tokenInfoCache: Map<string, { symbol: string; ratio: number | null }>;
+  tokenInfoCache: Map<string, TokenInfo>;
   neighborCache: Map<number, number[]>;
   gridData: any;
   activeAuctions: Record<number, PonziLandAuction>;
@@ -101,19 +104,60 @@ interface TileComponentProps {
   showNotOwned: boolean;
   hideNotRecommended: boolean;
   durationCapHours: number;
+  config: PonziLandConfig | null;
   onTileClick: (tileDetails: SelectedTileDetails) => void;
 }
 
 const TileComponent = memo(({ 
   row, col, location, land, auction, isHighlighted, tokenInfoCache, neighborCache, 
-  gridData, activeAuctions, selectedLayer, selectedToken, showNotOwned, hideNotRecommended, durationCapHours, onTileClick 
+  gridData, activeAuctions, selectedLayer, selectedToken, showNotOwned, hideNotRecommended, durationCapHours, config, onTileClick 
 }: TileComponentProps) => {
   // Use custom hook for expensive auction calculations
   const auctionCalculations = useAuctionCalculations(
-    auction, land, location, neighborCache, gridData, activeAuctions, tokenInfoCache
+    auction,
+    land,
+    location,
+    neighborCache,
+    gridData,
+    activeAuctions,
+    tokenInfoCache,
+    config
   );
 
   // Extract relevant tiles to minimize dependencies
+  const formatStrkValue = useCallback(
+    (value: number, decimals = 2) => {
+      if (!Number.isFinite(value) || value === 0) {
+        return '0';
+      }
+
+      const abs = Math.abs(value);
+      const dynamicDecimals = abs >= 1
+        ? decimals
+        : Math.min(6, Math.max(decimals, Math.ceil(-Math.log10(abs)) + 1));
+
+      return formatStrkAmount(value, { decimals: dynamicDecimals, compact: true });
+    },
+    [],
+  );
+
+  const formatSignedStrk = useCallback(
+    (value: number, decimals = 2) => {
+      if (!Number.isFinite(value) || value === 0) {
+        return formatStrkValue(0, decimals);
+      }
+      const sign = value > 0 ? '+' : '-';
+      return `${sign}${formatStrkValue(Math.abs(value), decimals)}`;
+    },
+    [formatStrkValue],
+  );
+
+  const landTokenAddress = useMemo(() => (
+    land ? normalizeTokenAddress(land.token_used) : ''
+  ), [land]);
+
+  const normalizedSelectedToken = useMemo(() => normalizeTokenAddress(selectedToken), [selectedToken]);
+
   const relevantTileData = useMemo(() => {
     const neighbors = neighborCache.get(location) || [];
     const relevantTiles = neighbors.map(loc => gridData.tiles[loc]).filter(Boolean);
@@ -123,13 +167,36 @@ const TileComponent = memo(({
 
   // Simplified tile calculation logic with auction calculations extracted
   const tileData = useMemo(() => {
-    const { symbol, ratio } = getTokenInfoCached(land?.token_used || '', tokenInfoCache);
+    const { symbol, ratio, decimals } = getTokenInfoCached(land?.token_used || '', tokenInfoCache);
     
-    const taxInfo = calculateTaxInfoCached(location, gridData.tiles, tokenInfoCache, neighborCache, activeAuctions);
-    const yieldInfo = calculateTotalYieldInfoCached(location, gridData.tiles, tokenInfoCache, neighborCache, activeAuctions);
-    const landPriceESTRK = land ? convertToESTRK(land.sell_price, symbol, ratio) : 0;
-    const burnRate = land ? calculateBurnRate(land, gridData.tiles, activeAuctions) : 0;
-    const nukableStatus = land ? isNukable(land, burnRate) : false;
+    const taxInfo = calculateTaxInfoCached(location, gridData.tiles, tokenInfoCache, neighborCache, activeAuctions, config);
+    const yieldInfo = calculateTotalYieldInfoCached(
+      location,
+      gridData.tiles,
+      tokenInfoCache,
+      neighborCache,
+      activeAuctions,
+      durationCapHours,
+      config,
+    );
+    const landPriceSTRK = land ? convertToSTRK(land.sell_price, symbol, ratio, decimals) : 0;
+    const burnRate = land ? calculateBurnRate(land, gridData.tiles, activeAuctions, tokenInfoCache, neighborCache, config) : 0;
+    const stakedTokenAmount = land ? hexToDecimal(land.staked_amount || '0x0', decimals) : 0;
+    const stakedValueSTRK = land
+      ? ratio && ratio > 0
+        ? convertToSTRK(land.staked_amount || '0x0', symbol, ratio, decimals)
+        : stakedTokenAmount
+      : 0;
+    const timeRemainingHours = stakedValueSTRK > 0
+      ? burnRate > 0
+        ? stakedValueSTRK / burnRate
+        : Infinity
+      : 0;
+    const nukableStatus: 'nukable' | 'warning' | false = stakedValueSTRK <= 0
+      ? 'nukable'
+      : timeRemainingHours * 60 <= 10
+        ? 'warning'
+        : false;
 
     // Use auction calculations from hook
     const { auctionYieldInfo, auctionROIForDetails, currentAuctionPriceForTileDisplay, potentialYieldAuction } = auctionCalculations;
@@ -143,12 +210,13 @@ const TileComponent = memo(({
       neighborCache,
       activeAuctions,
       auction ? currentAuctionPriceForTileDisplay : undefined,
-      durationCapHours
+      Math.min(durationCapHours, 48),
+      config
     );
 
     // Calculate display yield and colors based on selected layer
     let displayYield = 0;
-    let effectivePrice = landPriceESTRK;
+    let effectivePrice = landPriceSTRK;
     let isRecommendedForPurchase = purchaseRecommendation.isRecommended;
     let recommendationMessage = purchaseRecommendation.recommendationReason;
     
@@ -156,8 +224,8 @@ const TileComponent = memo(({
     const netProfit = purchaseRecommendation.maxYield - purchaseRecommendation.requiredTotalTax - purchaseRecommendation.currentPrice;
     
     // For token layer, check if this tile matches the filter criteria
-    const isSelectedTokenTile = selectedLayer === 'token' && selectedToken && land && (
-      showNotOwned ? land.token_used !== selectedToken : land.token_used === selectedToken
+    const isSelectedTokenTile = selectedLayer === 'token' && normalizedSelectedToken && land && (
+      showNotOwned ? landTokenAddress !== normalizedSelectedToken : landTokenAddress === normalizedSelectedToken
     );
     
     if (auction && auctionYieldInfo) {
@@ -178,10 +246,10 @@ const TileComponent = memo(({
         displayYield = netProfit;
       } else if (selectedLayer === 'token') {
         // Token layer: Show gross return (same as analysis layer)
-        displayYield = yieldInfo.totalYield + landPriceESTRK;
+        displayYield = yieldInfo.totalYield + landPriceSTRK;
       } else {
         // Analysis layer: Total yield + purchase price
-        displayYield = yieldInfo.totalYield + landPriceESTRK;
+        displayYield = yieldInfo.totalYield + landPriceSTRK;
       }
     }
       
@@ -194,7 +262,7 @@ const TileComponent = memo(({
         (isSelectedTokenTile ? displayYield : -1) : // Show gross return if selected token, gray otherwise
         (auction && auctionYieldInfo ? 
           auctionYieldInfo.totalYield + (currentAuctionPriceForTileDisplay || 0) : 
-          yieldInfo.totalYield + landPriceESTRK);
+          yieldInfo.totalYield + landPriceSTRK);
     
     const valueColor = land ? getValueColor(
       land.sell_price, 
@@ -202,13 +270,45 @@ const TileComponent = memo(({
     ) : '#1a1a1a';
 
     return {
-      symbol, ratio, taxInfo, yieldInfo, auctionYieldInfo, landPriceESTRK, 
-      burnRate, nukableStatus, potentialYieldAuction, auctionROIForDetails,
-      currentAuctionPriceForTileDisplay, displayYield, effectivePrice, 
-      valueColor, isRecommendedForPurchase, recommendationMessage,
-      purchaseRecommendation, netProfit
+      symbol,
+      ratio,
+      taxInfo,
+      yieldInfo,
+      auctionYieldInfo,
+      landPriceSTRK,
+      burnRate,
+      nukableStatus,
+      potentialYieldAuction,
+      auctionROIForDetails,
+      currentAuctionPriceForTileDisplay,
+      displayYield,
+      effectivePrice,
+      valueColor,
+      isRecommendedForPurchase,
+      recommendationMessage,
+      purchaseRecommendation,
+      netProfit,
+      stakedValueSTRK,
+      stakedTokenAmount,
+      timeRemainingHours,
+      tokenDecimals: decimals,
     };
-  }, [location, land, auction, tokenInfoCache, neighborCache, relevantTileData, activeAuctions, selectedLayer, selectedToken, auctionCalculations, durationCapHours]);
+  }, [
+    location,
+    land,
+    auction,
+    tokenInfoCache,
+    neighborCache,
+    relevantTileData,
+    activeAuctions,
+    selectedLayer,
+    normalizedSelectedToken,
+    auctionCalculations,
+    durationCapHours,
+    config,
+    landTokenAddress,
+    showNotOwned,
+  ]);
 
   const currentTileDetails = useMemo((): SelectedTileDetails => ({
     location,
@@ -220,14 +320,18 @@ const TileComponent = memo(({
     auctionYieldInfo: tileData.auctionYieldInfo,
     symbol: tileData.symbol,
     ratio: tileData.ratio,
-    landPriceESTRK: tileData.landPriceESTRK,
+    tokenDecimals: tileData.tokenDecimals,
+    landPriceSTRK: tileData.landPriceSTRK,
     valueColor: tileData.valueColor,
     isMyLand: isHighlighted,
     burnRate: tileData.burnRate,
     nukableStatus: tileData.nukableStatus,
     potentialYieldAuction: tileData.potentialYieldAuction,
     auctionROI: tileData.auctionROIForDetails,
-    purchaseRecommendation: tileData.purchaseRecommendation
+    purchaseRecommendation: tileData.purchaseRecommendation,
+    currentAuctionPriceSTRK: tileData.currentAuctionPriceForTileDisplay,
+    stakedTokenAmount: tileData.stakedTokenAmount,
+    timeRemainingHours: tileData.timeRemainingHours,
   }), [location, col, row, land, auction, tileData, isHighlighted]);
 
   const handleClick = useCallback(() => {
@@ -237,8 +341,8 @@ const TileComponent = memo(({
   // Check if this tile should be hidden (shown as empty)
   const shouldShowAsEmpty = (selectedLayer === 'yield' && hideNotRecommended && 
     land && !tileData.isRecommendedForPurchase) ||
-    (selectedLayer === 'token' && selectedToken && land && (
-      showNotOwned ? land.token_used === selectedToken : land.token_used !== selectedToken
+    (selectedLayer === 'token' && normalizedSelectedToken && land && (
+      showNotOwned ? landTokenAddress === normalizedSelectedToken : landTokenAddress !== normalizedSelectedToken
     ));
 
   return (
@@ -263,22 +367,19 @@ const TileComponent = memo(({
           <>
             <TileLevel>L{getLevelNumber(land.level)}</TileLevel>
             <TileHeader>
-              {selectedLayer === 'yield' ? (
-                tileData.auctionYieldInfo ? 
-                  (!tileData.isRecommendedForPurchase ? 
-                    tileData.recommendationMessage :
-                    `${tileData.displayYield > 0 ? '+' : ''}${tileData.displayYield.toFixed(1)}`
-                  ) :
-                  'AUCTION'
-              ) : (
-                'AUCTION'
-              )}
+              {selectedLayer === 'yield'
+                ? tileData.auctionYieldInfo
+                  ? (!tileData.isRecommendedForPurchase
+                      ? tileData.recommendationMessage
+                      : formatSignedStrk(tileData.displayYield, 1))
+                  : 'AUCTION'
+                : 'AUCTION'}
             </TileHeader>
             <CompactTaxInfo>
-              <div>{tileData.currentAuctionPriceForTileDisplay !== undefined ? tileData.currentAuctionPriceForTileDisplay.toFixed(1) : 'N/A'} nftSTRK</div>
+              <div>{tileData.currentAuctionPriceForTileDisplay !== undefined ? `${formatStrkValue(tileData.currentAuctionPriceForTileDisplay, 2)} STRK` : 'N/A'}</div>
               {tileData.auctionYieldInfo && (
                 <>
-                  <div>Yield: {tileData.auctionYieldInfo.yieldPerHour > 0 ? '+' : ''}{tileData.auctionYieldInfo.yieldPerHour.toFixed(1)}/h</div>
+                  <div>Yield: {formatSignedStrk(tileData.auctionYieldInfo.yieldPerHour, 2)}/h</div>
                   <div style={{ color: tileData.auctionYieldInfo.yieldPerHour > 0 ? '#4CAF50' : '#ff6b6b' }}>
                     ROI: {tileData.auctionROIForDetails?.toFixed(1) || '0.0'}%/h
                   </div>
@@ -302,24 +403,24 @@ const TileComponent = memo(({
           <>
             <TileLevel>L{getLevelNumber(land.level)}</TileLevel>
             <TileHeader>
-              {selectedLayer === 'yield' && !tileData.isRecommendedForPurchase ? 
-                tileData.recommendationMessage :
-                (tileData.displayYield !== 0 ? 
-                  `${tileData.displayYield > 0 ? '+' : ''}${tileData.displayYield.toFixed(1)}` :
-                  ''
-                )
-              }
+              {selectedLayer === 'yield' && !tileData.isRecommendedForPurchase
+                ? tileData.recommendationMessage
+                : tileData.displayYield !== 0
+                  ? formatSignedStrk(tileData.displayYield, 1)
+                  : ''}
             </TileHeader>
             <CompactTaxInfo>
               {land.sell_price ? (
                 <>
-                  <div>{formatOriginalPrice(land.sell_price)} {tileData.symbol}</div>
-                  {tileData.symbol !== 'nftSTRK' && tileData.ratio !== null && (
-                    <div>{calculateESTRKPrice(land.sell_price, tileData.ratio)} nftSTRK</div>
-                  )}
-                  <div>Yield: {tileData.yieldInfo.yieldPerHour > 0 ? '+' : ''}{tileData.yieldInfo.yieldPerHour.toFixed(1)}/h</div>
+                  <div>
+                    {formatOriginalPrice(land.sell_price, tileData.tokenDecimals ?? 18, {
+                      compact: true,
+                      tokenDecimals: tileData.tokenDecimals ?? 18,
+                    })} {tileData.symbol} ({formatStrkValue(tileData.landPriceSTRK, 2)} STRK)
+                  </div>
+                  <div>Yield: {formatSignedStrk(tileData.yieldInfo.yieldPerHour, 2)}/h</div>
                   <div style={{ color: tileData.yieldInfo.yieldPerHour > 0 ? '#4CAF50' : '#ff6b6b' }}>
-                    ROI: {calculateROI(tileData.yieldInfo.yieldPerHour, tileData.landPriceESTRK).toFixed(2)}%/h
+                    ROI: {calculateROI(tileData.yieldInfo.yieldPerHour, tileData.landPriceSTRK).toFixed(2)}%/h
                   </div>
                 </>
               ) : (
@@ -327,7 +428,11 @@ const TileComponent = memo(({
               )}
             </CompactTaxInfo>
             <StakedInfo $isNukable={tileData.nukableStatus}>
-              {formatTimeRemaining(hexToDecimal(land.staked_amount || '0x0') / tileData.burnRate)}
+              {tileData.timeRemainingHours === undefined
+                ? 'N/A'
+                : tileData.timeRemainingHours === Infinity
+                  ? '∞'
+                  : formatTimeRemaining(tileData.timeRemainingHours)}
             </StakedInfo>
           </>
         )

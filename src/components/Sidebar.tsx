@@ -1,8 +1,15 @@
 import { memo, useMemo, useCallback } from 'react';
-import { SelectedTileDetails, TokenPrice, MapLayer } from '../types/ponziland';
+import { SelectedTileDetails, TokenPrice, PonziLandConfig, MapLayer } from '../types/ponziland';
 import { PlayerStats } from '../hooks/usePlayerStats';
 import { AUCTION_DURATION } from '../constants/ponziland';
-import { formatRatio, hexToDecimal, formatTimeRemaining } from '../utils/formatting';
+import {
+  formatRatio,
+  formatTimeRemaining,
+  BASE_TOKEN_SYMBOL,
+  normalizeTokenAddress,
+  formatTokenAmount,
+} from '../utils/formatting';
+import { getTokenMetadata } from '../data/tokenMetadata';
 import { calculateAuctionPrice, getElapsedSeconds } from '../utils/auctionUtils';
 import { calculateROI } from '../utils/taxCalculations';
 import { getLevelNumber } from '../utils/dataProcessing';
@@ -83,6 +90,7 @@ interface SidebarProps {
   usernameCache: Record<string, string>;
   loadingSql: boolean;
   playerStats: PlayerStats;
+  config: PonziLandConfig | null;
   onTabChange: (tab: 'map' | 'analysis') => void;
   onLayerChange: (layer: MapLayer) => void;
   onTokenChange: (token: string) => void;
@@ -106,6 +114,7 @@ const Sidebar = memo(({
   usernameCache,
   loadingSql,
   playerStats,
+  config,
   onTabChange,
   onLayerChange,
   onTokenChange,
@@ -114,6 +123,102 @@ const Sidebar = memo(({
   onDurationCapChange,
   onPlayerSelectionChange
 }: SidebarProps) => {
+  const formatStrkValue = useCallback((value: number, decimals = 2) => {
+    if (!Number.isFinite(value) || value === 0) {
+      return '0';
+    }
+
+    const abs = Math.abs(value);
+    const dynamicDecimals = abs >= 1
+      ? decimals
+      : Math.min(6, Math.max(decimals, Math.ceil(-Math.log10(abs)) + 1));
+
+    return value.toLocaleString(undefined, {
+      minimumFractionDigits: dynamicDecimals,
+      maximumFractionDigits: dynamicDecimals,
+    });
+  }, []);
+  const formatSignedStrk = useCallback((value: number, decimals = 2) => {
+    if (!Number.isFinite(value) || value === 0) {
+      return '0';
+    }
+    const sign = value > 0 ? '+' : '-';
+    return `${sign}${formatStrkValue(Math.abs(value), decimals)}`;
+  }, [formatStrkValue]);
+
+  const formatValueInToken = useCallback(
+    (valueStrk: number, tokenAddress?: string, preferToken = false) => {
+      const formattedStrk = `${formatStrkValue(valueStrk, 2)} STRK`;
+      const normalizedAddress = normalizeTokenAddress(tokenAddress);
+      if (!Number.isFinite(valueStrk) || !normalizedAddress) {
+        return formattedStrk;
+      }
+
+      const token = prices.find(p => normalizeTokenAddress(p.address) === normalizedAddress);
+      if (!token || token.symbol === BASE_TOKEN_SYMBOL || !token.ratio || token.ratio <= 0) {
+        return formattedStrk;
+      }
+
+      const tokenAmount = valueStrk * token.ratio;
+      const metadata = getTokenMetadata(token.address);
+      const formattedToken = formatTokenAmount(tokenAmount, metadata?.decimals ?? 6);
+
+      if (preferToken) {
+        return `${formattedToken} ${token.symbol} (${formattedStrk})`;
+      }
+
+      return `${formattedStrk} (${formattedToken} ${token.symbol})`;
+    },
+    [prices, formatStrkValue],
+  );
+
+  const landTokenAddress = useMemo(() => (
+    selectedTileData?.land ? normalizeTokenAddress(selectedTileData.land.token_used) : ''
+  ), [selectedTileData?.land]);
+
+  const stakeConversionAddress = useMemo(() => {
+    const selected = normalizeTokenAddress(selectedStakeToken);
+    if (selected) return selected;
+    return landTokenAddress;
+  }, [selectedStakeToken, landTokenAddress]);
+
+  const stakingDisplay = useMemo(() => {
+    if (!selectedTileData?.land) {
+      return {
+        amount: `${formatStrkValue(0, 2)} STRK`,
+        burnRate: `${formatStrkValue(0, 2)} STRK/h`,
+        timeRemaining: undefined as number | undefined,
+      };
+    }
+
+    const stakedStrk = selectedTileData.stakedValueSTRK ?? 0;
+    const burnRateStrk = selectedTileData.burnRate ?? 0;
+    const tokenAmount = selectedTileData.stakedTokenAmount ?? 0;
+    const timeRemaining = selectedTileData.timeRemainingHours;
+
+    const landPrice = prices.find(p => normalizeTokenAddress(p.address) === landTokenAddress);
+    const landMetadata = getTokenMetadata(landTokenAddress);
+    const tokenSymbol = landPrice?.symbol
+      ?? landMetadata?.symbol
+      ?? (landTokenAddress ? selectedTileData.symbol : BASE_TOKEN_SYMBOL);
+    const tokenDecimals = landMetadata?.decimals ?? selectedTileData.tokenDecimals ?? 6;
+
+    const burnRateToken = burnRateStrk > 0 && tokenAmount > 0 && stakedStrk > 0
+      ? burnRateStrk * (tokenAmount / stakedStrk)
+      : 0;
+
+    const amountTokenStr = `${formatTokenAmount(tokenAmount, tokenDecimals)} ${tokenSymbol}`;
+    const burnTokenStr = `${formatTokenAmount(burnRateToken, tokenDecimals)} ${tokenSymbol}`;
+
+    const amount = `${amountTokenStr} (${formatStrkValue(stakedStrk, 2)} STRK)`;
+    const burnRate = `${burnTokenStr} (${formatStrkValue(burnRateStrk, 2)} STRK)/h`;
+
+    return {
+      amount,
+      burnRate,
+      timeRemaining,
+    };
+  }, [selectedTileData, landTokenAddress, prices, formatStrkValue]);
   // Memoize tab configuration to avoid recreation
   const tabConfig = useMemo(() => [
     { key: 'map' as const, label: '🗺️', title: 'Map & Data' },
@@ -123,9 +228,9 @@ const Sidebar = memo(({
   // Memoize sorted prices (include all tokens)
   const sortedPrices = useMemo(() => 
     prices.sort((a, b) => {
-      // Put nftSTRK first
-      if (a.symbol === 'nftSTRK') return -1;
-      if (b.symbol === 'nftSTRK') return 1;
+      // Put STRK first
+      if (a.symbol === 'STRK') return -1;
+      if (b.symbol === 'STRK') return 1;
       return (a.ratio || 0) - (b.ratio || 0);
     })
   , [prices]);
@@ -146,6 +251,11 @@ const Sidebar = memo(({
   const handleMouseLeave = useCallback((e: React.MouseEvent<HTMLAnchorElement>) => {
     e.currentTarget.style.transform = 'translateY(0)';
   }, []);
+  const resolvedAuctionDuration = config?.auction_duration ?? AUCTION_DURATION;
+  const currentAuctionPrice = selectedTileData?.auction
+    ? selectedTileData.currentAuctionPriceSTRK ?? calculateAuctionPrice(selectedTileData.auction, config || undefined)
+    : undefined;
+
   return (
     <SidebarContainer>
       {/* Sidebar Header */}
@@ -203,8 +313,8 @@ const Sidebar = memo(({
                   <ControlGroup>
                     <h4 style={{ margin: '0 0 8px 0', fontSize: '12px', color: '#ccc' }}>SELECT TOKEN</h4>
                     <select
-                      value={selectedToken}
-                      onChange={(e) => onTokenChange(e.target.value)}
+                      value={normalizeTokenAddress(selectedToken)}
+                      onChange={(e) => onTokenChange(normalizeTokenAddress(e.target.value))}
                       style={{
                         width: '100%',
                         padding: '8px',
@@ -216,11 +326,14 @@ const Sidebar = memo(({
                       }}
                     >
                       <option value="" disabled>Choose a token...</option>
-                      {sortedPrices.map(token => (
-                        <option key={token.address} value={token.address} style={{ backgroundColor: '#333' }}>
-                          {token.symbol}
-                        </option>
-                      ))}
+                      {sortedPrices.map(token => {
+                        const optionValue = normalizeTokenAddress(token.address);
+                        return (
+                          <option key={token.address} value={optionValue} style={{ backgroundColor: '#333' }}>
+                            {token.symbol}
+                          </option>
+                        );
+                      })}
                     </select>
                     <LayerOption style={{ fontSize: '11px', marginTop: '8px', color: '#bbb' }}>
                       <CompactCheckbox 
@@ -243,7 +356,7 @@ const Sidebar = memo(({
                         <input
                           type="range"
                           min="2"
-                          max="24"
+                          max="48"
                           step="1"
                           value={durationCapHours}
                           onChange={(e) => onDurationCapChange(Number(e.target.value))}
@@ -258,7 +371,7 @@ const Sidebar = memo(({
                         />
                       <DurationOptions>
                         <span>2h</span>
-                        <span>24h</span>
+                        <span>48h</span>
                       </DurationOptions>
                     </DurationControls>
                   </ControlGroup>
@@ -302,16 +415,16 @@ const Sidebar = memo(({
                       </InfoLine>
                       <InfoLine style={{ marginBottom: '4px' }}>
                         <InfoLabel>Portfolio Value:</InfoLabel>
-                        <InfoValue>{playerStats.totalPortfolioValue.toFixed(1)} nftSTRK</InfoValue>
+                        <InfoValue>{formatStrkValue(playerStats.totalPortfolioValue, 1)} STRK</InfoValue>
                       </InfoLine>
                       <InfoLine style={{ marginBottom: '4px' }}>
                         <InfoLabel>Staked Value:</InfoLabel>
-                        <InfoValue>{playerStats.totalStakedValue.toFixed(1)} nftSTRK</InfoValue>
+                        <InfoValue>{formatStrkValue(playerStats.totalStakedValue, 1)} STRK</InfoValue>
                       </InfoLine>
                       <InfoLine style={{ marginBottom: '4px' }}>
                         <InfoLabel>Total Yield:</InfoLabel>
                         <InfoValue style={{ color: playerStats.totalYield > 0 ? '#4CAF50' : '#ff6b6b' }}>
-                          {playerStats.totalYield > 0 ? '+' : ''}{playerStats.totalYield.toFixed(1)} nftSTRK
+                          {formatSignedStrk(playerStats.totalYield, 1)} STRK
                         </InfoValue>
                       </InfoLine>
                     </div>
@@ -360,9 +473,9 @@ const Sidebar = memo(({
                   <TokenList>
                     {sortedPrices.map(token => (
                       <TokenItem key={token.address}>
-                        <TokenSymbol>nftSTRK</TokenSymbol>
+                        <TokenSymbol>STRK</TokenSymbol>
                         <TokenRatio>
-                          {token.symbol === 'nftSTRK' ? '1.00' : (token.ratio !== null ? formatRatio(token.ratio) : 'N/A')}
+                          {token.symbol === 'STRK' ? '1.00' : (token.ratio !== null ? formatRatio(token.ratio) : 'N/A')}
                         </TokenRatio>
                         <TokenTarget>{token.symbol}</TokenTarget>
                       </TokenItem>
@@ -434,9 +547,9 @@ const Sidebar = memo(({
                                     {/* Stake Token Selector */}
                                     <div style={{ marginBottom: '8px' }}>
                                       <InfoLabel style={{ display: 'block', marginBottom: '4px' }}>Stake Token:</InfoLabel>
-                                      <select
-                                        value={selectedStakeToken || selectedTileData.land.token_used}
-                                        onChange={(e) => onStakeTokenChange(e.target.value)}
+                                     <select
+                                        value={stakeConversionAddress}
+                                        onChange={(e) => onStakeTokenChange(normalizeTokenAddress(e.target.value))}
                                         style={{
                                           width: '100%',
                                           padding: '6px',
@@ -448,81 +561,51 @@ const Sidebar = memo(({
                                         }}
                                       >
                                         {sortedPrices.map(token => (
-                                          <option key={token.address} value={token.address} style={{ backgroundColor: '#333' }}>
-                                            {token.symbol} ({token.symbol === 'nftSTRK' ? '1.00' : formatRatio(token.ratio)})
+                                          <option key={token.address} value={normalizeTokenAddress(token.address)} style={{ backgroundColor: '#333' }}>
+                                            {token.symbol} ({token.symbol === 'STRK' ? '1.00' : formatRatio(token.ratio)})
                                           </option>
                                         ))}
                                       </select>
-                                    </div>
+                                   </div>
                                     
                                     <InfoLine>
                                       <InfoLabel>Current Ask:</InfoLabel>
                                       <InfoValue>
-                                        {(() => {
-                                          const stakeToken = selectedStakeToken || selectedTileData.land.token_used;
-                                          const stakeTokenInfo = prices.find(p => p.address === stakeToken);
-                                          const stakeTokenSymbol = stakeTokenInfo?.symbol || 'nftSTRK';
-                                          const stakeTokenRatio = stakeTokenInfo?.ratio || 1;
-                                          
-                                          // If stake token is nftSTRK, no conversion needed
-                                          if (stakeTokenSymbol === 'nftSTRK') {
-                                            return `${recommendation.currentPrice.toFixed(1)} nftSTRK`;
-                                          }
-                                          
-                                          // Convert from nftSTRK to stake token (multiply by ratio)
-                                          const priceInStakeToken = recommendation.currentPrice * stakeTokenRatio;
-                                          return `${priceInStakeToken.toFixed(1)} ${stakeTokenSymbol}`;
-                                        })()}
+                                        {formatValueInToken(
+                                          recommendation.currentPrice,
+                                          landTokenAddress,
+                                          true,
+                                        )}
                                       </InfoValue>
                                     </InfoLine>
                                     <InfoLine>
                                       <span>Max Yield ({durationCapHours}h):</span>
-                                      <span style={{ color: '#4CAF50' }}>{recommendation.maxYield.toFixed(1)} nftSTRK</span>
+                                      <span style={{ color: '#4CAF50' }}>{formatStrkValue(recommendation.maxYield, 1)} STRK</span>
                                     </InfoLine>
                                     <InfoLine>
                                       <span>Recommended Price:</span>
                                       <span style={{ color: '#03a9f4' }}>
-                                        {(() => {
-                                          const stakeToken = selectedStakeToken || selectedTileData.land.token_used;
-                                          const stakeTokenInfo = prices.find(p => p.address === stakeToken);
-                                          const stakeTokenSymbol = stakeTokenInfo?.symbol || 'nftSTRK';
-                                          const stakeTokenRatio = stakeTokenInfo?.ratio || 1;
-                                          
-                                          // If stake token is nftSTRK, no conversion needed
-                                          if (stakeTokenSymbol === 'nftSTRK') {
-                                            return `${recommendation.recommendedPrice.toFixed(1)} nftSTRK`;
-                                          }
-                                          
-                                          // Convert from nftSTRK to stake token (multiply by ratio)
-                                          const priceInStakeToken = recommendation.recommendedPrice * stakeTokenRatio;
-                                          return `${priceInStakeToken.toFixed(1)} ${stakeTokenSymbol}`;
-                                        })()}
+                                        {formatValueInToken(
+                                          recommendation.recommendedPrice,
+                                          stakeConversionAddress,
+                                          true,
+                                        )}
                                       </span>
                                     </InfoLine>
                                     <InfoLine>
                                       <span>Required Stake:</span>
                                       <span style={{ color: '#ff9800' }}>
-                                        {(() => {
-                                          const stakeToken = selectedStakeToken || selectedTileData.land.token_used;
-                                          const stakeTokenInfo = prices.find(p => p.address === stakeToken);
-                                          const stakeTokenSymbol = stakeTokenInfo?.symbol || 'nftSTRK';
-                                          const stakeTokenRatio = stakeTokenInfo?.ratio || 1;
-                                          
-                                          // If stake token is nftSTRK, no conversion needed
-                                          if (stakeTokenSymbol === 'nftSTRK') {
-                                            return `${recommendation.requiredStakeForFullYield.toFixed(1)} nftSTRK`;
-                                          }
-                                          
-                                          // Convert from nftSTRK to stake token (multiply by ratio)
-                                          const requiredInStakeToken = recommendation.requiredStakeForFullYield * stakeTokenRatio;
-                                          return `${requiredInStakeToken.toFixed(1)} ${stakeTokenSymbol}`;
-                                        })()}
+                                        {formatValueInToken(
+                                          recommendation.requiredStakeForFullYield,
+                                          stakeConversionAddress,
+                                          true,
+                                        )}
                                       </span>
                                     </InfoLine>
                                     <InfoLine>
                                       <span>Net Profit:</span>
                                       <span style={{ color: netProfit > 0 ? '#4CAF50' : '#ff6b6b' }}>
-                                        {netProfit > 0 ? '+' : ''}{netProfit.toFixed(1)} nftSTRK
+                                        {formatSignedStrk(netProfit, 1)} STRK
                                       </span>
                                     </InfoLine>
                                   </>
@@ -549,20 +632,20 @@ const Sidebar = memo(({
                                     <>
                                       <InfoLine>
                                         <span>Price:</span>
-                                        <span style={{ color: 'white' }}>{calculateAuctionPrice(selectedTileData.auction).toFixed(2)} nftSTRK</span>
+                                        <span style={{ color: 'white' }}>
+                                          {currentAuctionPrice !== undefined ? `${formatStrkValue(currentAuctionPrice, 2)} STRK` : 'N/A'}
+                                        </span>
                                       </InfoLine>
                                       <InfoLine>
                                         <span>Gross Return:</span>
-                                        <span style={{ color: (selectedTileData.auctionYieldInfo.totalYield + calculateAuctionPrice(selectedTileData.auction)) > 0 ? '#4CAF50' : '#ff6b6b' }}>
-                                          {(selectedTileData.auctionYieldInfo.totalYield + calculateAuctionPrice(selectedTileData.auction)) > 0 ? '+':''}
-                                          {(selectedTileData.auctionYieldInfo.totalYield + calculateAuctionPrice(selectedTileData.auction)).toFixed(1)} nftSTRK
+                                        <span style={{ color: (selectedTileData.auctionYieldInfo.totalYield + (currentAuctionPrice || 0)) > 0 ? '#4CAF50' : '#ff6b6b' }}>
+                                          {formatSignedStrk(selectedTileData.auctionYieldInfo.totalYield + (currentAuctionPrice || 0), 1)} STRK
                                         </span>
                                       </InfoLine>
                                       <InfoLine>
                                         <span>Yield/Hour:</span>
                                         <span style={{ color: selectedTileData.auctionYieldInfo.yieldPerHour > 0 ? '#4CAF50' : '#ff6b6b' }}>
-                                          {selectedTileData.auctionYieldInfo.yieldPerHour > 0 ? '+':''}
-                                          {selectedTileData.auctionYieldInfo.yieldPerHour.toFixed(1)}/h
+                                          {formatSignedStrk(selectedTileData.auctionYieldInfo.yieldPerHour, 1)}/h
                                         </span>
                                       </InfoLine>
                                       {selectedTileData.auctionROI !== undefined && (
@@ -577,7 +660,8 @@ const Sidebar = memo(({
                                         <span>Ends In:</span>
                                         <span>{(() => {
                                           const elapsed = getElapsedSeconds(selectedTileData.auction);
-                                          const remaining = AUCTION_DURATION - elapsed;
+                                          const duration = selectedTileData.auctionDurationSeconds || resolvedAuctionDuration;
+                                          const remaining = duration - elapsed;
                                           if (remaining <=0) return "Ended";
                                           const hours = Math.floor(remaining / 3600);
                                           const minutes = Math.floor((remaining % 3600) / 60);
@@ -587,10 +671,10 @@ const Sidebar = memo(({
                                       </InfoLine>
                                     </>
                                   ) : (
-                                    <InfoLine>
-                                      <span>Price:</span>
-                                      <span>{calculateAuctionPrice(selectedTileData.auction).toFixed(2)} nftSTRK</span>
-                                    </InfoLine>
+                                      <InfoLine>
+                                        <span>Price:</span>
+                                        <span>{currentAuctionPrice !== undefined ? `${formatStrkValue(currentAuctionPrice, 2)} STRK` : 'N/A'}</span>
+                                      </InfoLine>
                                   )}
                                 </div>
                               </>
@@ -602,57 +686,59 @@ const Sidebar = memo(({
                                     <span>Price:</span>
                                     <span style={{ color: 'white' }}>
                                       {selectedTileData.land.sell_price ? 
-                                        `${selectedTileData.landPriceESTRK.toFixed(2)} nftSTRK` : 
+                                        `${formatStrkValue(selectedTileData.landPriceSTRK, 2)} STRK` : 
                                         'Not for sale'
                                       }
                                     </span>
                                   </InfoLine>
                                   <InfoLine>
                                     <span>Gross Return:</span>
-                                    <span style={{ color: (selectedTileData.yieldInfo.totalYield + selectedTileData.landPriceESTRK) > 0 ? '#4CAF50' : '#ff6b6b'}}>
-                                      {(selectedTileData.yieldInfo.totalYield + selectedTileData.landPriceESTRK) > 0 ? '+':''}
-                                      {(selectedTileData.yieldInfo.totalYield + selectedTileData.landPriceESTRK).toFixed(1)} nftSTRK
+                                    <span style={{ color: (selectedTileData.yieldInfo.totalYield + selectedTileData.landPriceSTRK) > 0 ? '#4CAF50' : '#ff6b6b'}}>
+                                      {formatSignedStrk(selectedTileData.yieldInfo.totalYield + selectedTileData.landPriceSTRK, 1)} STRK
                                     </span>
                                   </InfoLine>
                                   <InfoLine>
                                     <span>Yield/Hour:</span>
                                     <span style={{ color: selectedTileData.yieldInfo.yieldPerHour > 0 ? '#4CAF50' : '#ff6b6b'}}>
-                                      {selectedTileData.yieldInfo.yieldPerHour > 0 ? '+':''}
-                                      {selectedTileData.yieldInfo.yieldPerHour.toFixed(1)}/h
+                                      {formatSignedStrk(selectedTileData.yieldInfo.yieldPerHour, 1)}/h
                                     </span>
                                   </InfoLine>
-                                  {selectedTileData.landPriceESTRK > 0 && (
+                                  {selectedTileData.landPriceSTRK > 0 && (
                                     <InfoLine>
                                       <span>ROI:</span>
-                                      <span style={{ color: calculateROI(selectedTileData.yieldInfo.yieldPerHour, selectedTileData.landPriceESTRK) > 0 ? '#4CAF50' : '#ff6b6b' }}>
-                                        {calculateROI(selectedTileData.yieldInfo.yieldPerHour, selectedTileData.landPriceESTRK).toFixed(1)}%/h
+                                      <span style={{ color: calculateROI(selectedTileData.yieldInfo.yieldPerHour, selectedTileData.landPriceSTRK) > 0 ? '#4CAF50' : '#ff6b6b' }}>
+                                        {calculateROI(selectedTileData.yieldInfo.yieldPerHour, selectedTileData.landPriceSTRK).toFixed(1)}%/h
                                       </span>
                                     </InfoLine>
                                   )}
                                 </div>
 
-                                <div>
+                              <div>
                                   <div style={{ fontWeight: 'bold', marginBottom: '4px', color: '#7cb3ff' }}>Staking Info</div>
                                   <InfoLine>
                                     <span>Amount:</span>
-                                    <span>{hexToDecimal(selectedTileData.land.staked_amount || '0x0').toFixed(2)} {selectedTileData.symbol}</span>
+                                    <span>{stakingDisplay.amount}</span>
                                   </InfoLine>
                                   <InfoLine>
                                     <span>Burn Rate:</span>
-                                    <span>{selectedTileData.burnRate > 0 ? selectedTileData.burnRate.toFixed(2) : '0.00'}/h</span>
+                                    <span>{stakingDisplay.burnRate}</span>
                                   </InfoLine>
-                                  <InfoLine>
-                                    <span>Time Remaining:</span>
-                                    <span style={{
-                                      color: selectedTileData.nukableStatus === 'nukable' ? '#ff6b6b' : (selectedTileData.nukableStatus === 'warning' ? 'orange' : '#4CAF50'),
-                                      fontWeight: selectedTileData.nukableStatus !== false ? 'bold' : 'normal'
-                                    }}>
-                                      {selectedTileData.burnRate > 0 ? formatTimeRemaining(hexToDecimal(selectedTileData.land.staked_amount || '0x0') / selectedTileData.burnRate) : (hexToDecimal(selectedTileData.land.staked_amount || '0x0') > 0 ? '∞' : 'N/A')}
-                                    </span>
-                                  </InfoLine>
-                                </div>
-                              </>
-                            )}
+                                <InfoLine>
+                                  <span>Time Remaining:</span>
+                                  <span style={{
+                                    color: selectedTileData.nukableStatus === 'nukable' ? '#ff6b6b' : (selectedTileData.nukableStatus === 'warning' ? 'orange' : '#4CAF50'),
+                                    fontWeight: selectedTileData.nukableStatus !== false ? 'bold' : 'normal'
+                                  }}>
+                                      {stakingDisplay.timeRemaining === undefined
+                                        ? 'N/A'
+                                        : stakingDisplay.timeRemaining === Infinity
+                                          ? '∞'
+                                          : formatTimeRemaining(stakingDisplay.timeRemaining)}
+                                  </span>
+                                </InfoLine>
+                              </div>
+                            </>
+                          )}
                           </div>
                         </div>
                       </>

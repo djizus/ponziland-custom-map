@@ -1,56 +1,90 @@
 import { PonziLand, PonziLandStake } from '../types/ponziland';
-import { GRID_SIZE } from '../constants/ponziland';
+import { GRID_SIZE, COORD_MULTIPLIER, COORD_MASK, LOCATION_MASK } from '../constants/ponziland';
 
-// Convert location number to coordinates
-export const getCoordinates = (location: number | string): [string, string] => {
-  const numLocation = typeof location === 'string' ? Number(location) : location;
-  const x = numLocation % GRID_SIZE;
-  const y = Math.floor(numLocation / GRID_SIZE);
-  return [x.toString(), y.toString()];
+const LOCATION_BIT_MASK = BigInt(LOCATION_MASK);
+const COLUMN_MASK = BigInt(COORD_MASK);
+const ROW_SHIFT = BigInt(8);
+
+const toBigInt = (value: number | string | bigint | undefined | null): bigint | null => {
+  if (value === undefined || value === null) return null;
+  try {
+    if (typeof value === 'bigint') return value;
+    if (typeof value === 'number') return BigInt(value);
+    const trimmed = value.trim();
+    if (trimmed.length === 0) return null;
+    return trimmed.startsWith('0x') || trimmed.startsWith('0X')
+      ? BigInt(trimmed)
+      : BigInt(trimmed);
+  } catch (error) {
+    console.warn('Failed to parse location to BigInt:', value, error);
+    return null;
+  }
+};
+
+export const normalizeLocation = (
+  location: number | string | bigint | undefined | null,
+): number | null => {
+  const big = toBigInt(location);
+  if (big === null) return null;
+  return Number(big & LOCATION_BIT_MASK);
+};
+
+// Convert location number to coordinates (x, y)
+export const getCoordinates = (
+  location: number | string | bigint | undefined | null,
+): [number, number] => {
+  const big = toBigInt(location);
+  if (big === null) return [0, 0];
+
+  const normalized = big & LOCATION_BIT_MASK;
+  const col = Number(normalized & COLUMN_MASK);
+  const row = Number((normalized >> ROW_SHIFT) & COLUMN_MASK);
+  return [col, row];
+};
+
+export const encodeCoordinates = (col: number, row: number): number => {
+  return row * COORD_MULTIPLIER + col;
 };
 
 export const processGridData = (lands: PonziLand[], stakes: PonziLandStake[]) => {
-  const grid = Array(GRID_SIZE * GRID_SIZE).fill(null);
-  let minRow = GRID_SIZE;
-  let maxRow = 0;
-  let minCol = GRID_SIZE;
-  let maxCol = 0;
+  const grid = Array(GRID_SIZE * GRID_SIZE).fill(null) as (PonziLand | null)[];
 
   const stakesMap = stakes.reduce((acc, stake) => {
-    acc[Number(stake.location)] = stake.amount;
+    const normalized = normalizeLocation(stake.location);
+    if (normalized !== null) {
+      acc[normalized] = stake.amount;
+    }
     return acc;
   }, {} as Record<number, string>);
 
-  lands.forEach(land => {
-    const location = Number(land.location);
-    const [x, y] = getCoordinates(location);
-    minRow = Math.min(minRow, Number(y));
-    maxRow = Math.max(maxRow, Number(y));
-    minCol = Math.min(minCol, Number(x));
-    maxCol = Math.max(maxCol, Number(x));
-  });
+  const rowSet = new Set<number>();
+  const colSet = new Set<number>();
+  const locationSet = new Set<number>();
 
   lands.forEach(land => {
-    const location = Number(land.location);
-    grid[location] = {
+    const normalized = normalizeLocation(land.location);
+    if (normalized === null) return;
+
+    const [col, row] = getCoordinates(land.location);
+    rowSet.add(row);
+    colSet.add(col);
+    locationSet.add(normalized);
+
+    grid[normalized] = {
       ...land,
-      staked_amount: stakesMap[location] || '0x0'
+      staked_amount: stakesMap[normalized] || '0x0'
     };
   });
 
-  const activeRows = Array.from(
-    { length: maxRow - minRow + 1 },
-    (_, i) => minRow + i
-  );
-  const activeCols = Array.from(
-    { length: maxCol - minCol + 1 },
-    (_, i) => minCol + i
-  );
+  const activeRows = Array.from(rowSet).sort((a, b) => a - b);
+  const activeCols = Array.from(colSet).sort((a, b) => a - b);
+  const activeLocations = Array.from(locationSet).sort((a, b) => a - b);
 
   return {
     tiles: grid,
     activeRows,
-    activeCols
+    activeCols,
+    activeLocations
   };
 };
 

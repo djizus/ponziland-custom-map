@@ -26,10 +26,15 @@ export default async function handler(req: Request) {
   }
 
   try {
-    const response = await fetch('https://api.ponzi.land/price', {
+    const response = await fetch('https://api.runelabs.xyz/ponziland-mainnet/api//price', {
+      method: 'GET',
       headers: {
-        'Accept': 'application/json',
+        'Accept': '*/*',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Referer': 'https://play.ponzi.land/',
+        'User-Agent': 'PonzilandMap/1.0 (+https://play.ponzi.land)'
       },
+      cache: 'no-store'
     });
 
     const data = await response.json();
@@ -49,7 +54,7 @@ export default async function handler(req: Request) {
     
     console.error(`[${timestamp}] [API_PRICE] ${errorMessage}`, {
       error,
-      endpoint: 'https://api.ponzi.land/price',
+      endpoint: 'https://api.runelabs.xyz/ponziland-mainnet/api//price',
       userAgent: req.headers.get('user-agent'),
     });
 

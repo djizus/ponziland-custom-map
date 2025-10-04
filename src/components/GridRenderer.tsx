@@ -1,16 +1,25 @@
 import { memo, useMemo } from 'react';
-import { PonziLand, PonziLandAuction, SelectedTileDetails, MapLayer } from '../types/ponziland';
+import {
+  PonziLand,
+  PonziLandAuction,
+  PonziLandConfig,
+  SelectedTileDetails,
+  MapLayer,
+} from '../types/ponziland';
 import { GridContainer } from './PonzilandMap/styles/MapStyles';
 import TileComponent from './TileComponent';
+import { encodeCoordinates } from '../utils/dataProcessing';
+import type { TokenInfo } from '../utils/formatting';
 
 interface GridRendererProps {
   gridData: {
     tiles: (PonziLand | null)[];
     activeRows: number[];
     activeCols: number[];
+    activeLocations: number[];
   };
   activeAuctions: Record<number, PonziLandAuction>;
-  tokenInfoCache: Map<string, { symbol: string; ratio: number | null }>;
+  tokenInfoCache: Map<string, TokenInfo>;
   neighborCache: Map<number, number[]>;
   activeTileLocations: Array<{ row: number; col: number; location: number }>;
   selectedPlayerAddresses: Set<string>;
@@ -20,8 +29,33 @@ interface GridRendererProps {
   hideNotRecommended: boolean;
   durationCapHours: number;
   zoom: number;
+  config: PonziLandConfig | null;
   onTileClick: (tileDetails: SelectedTileDetails) => void;
 }
+
+interface InternalTileProps {
+  row: number;
+  col: number;
+  gridRow: number;
+  gridColumn: number;
+  location: number;
+  land: PonziLand | null;
+  auction: PonziLandAuction | null;
+  isHighlighted: boolean;
+  tokenInfoCache: Map<string, TokenInfo>;
+  neighborCache: Map<number, number[]>;
+  gridData: GridRendererProps['gridData'];
+  activeAuctions: Record<number, PonziLandAuction>;
+  selectedLayer: MapLayer;
+  selectedToken: string;
+  showNotOwned: boolean;
+  hideNotRecommended: boolean;
+  durationCapHours: number;
+  config: PonziLandConfig | null;
+  onTileClick: (tileDetails: SelectedTileDetails) => void;
+}
+
+const TILE_SIZE = 100;
 
 const GridRenderer = memo(({
   gridData,
@@ -36,48 +70,97 @@ const GridRenderer = memo(({
   hideNotRecommended,
   durationCapHours,
   zoom,
-  onTileClick
+  config: _config,
+  onTileClick,
 }: GridRendererProps) => {
-  // Memoize tile props calculation to prevent unnecessary re-renders
-  const tileProps = useMemo(() => {
-    return activeTileLocations.map(({ row, col, location }) => {
-      const land = gridData.tiles[location];
-      const auction = activeAuctions[location];
-      const isHighlighted = land?.owner ? selectedPlayerAddresses.has(land.owner.toLowerCase()) : false;
-      
-      return {
-        row,
-        col,
-        location,
-        land,
-        auction,
-        isHighlighted,
-        tokenInfoCache,
-        neighborCache,
-        gridData,
-        activeAuctions,
-        selectedLayer,
-        selectedToken,
-        showNotOwned,
-        hideNotRecommended,
-        durationCapHours,
-        onTileClick
-      };
+  const { tileProps, gridWidth, gridHeight } = useMemo(() => {
+    if (!activeTileLocations.length) {
+      return { tileProps: [] as InternalTileProps[], gridWidth: 0, gridHeight: 0 };
+    }
+
+    let minRow = Infinity;
+    let maxRow = -Infinity;
+    let minCol = Infinity;
+    let maxCol = -Infinity;
+
+    activeTileLocations.forEach(({ row, col }) => {
+      minRow = Math.min(minRow, row);
+      maxRow = Math.max(maxRow, row);
+      minCol = Math.min(minCol, col);
+      maxCol = Math.max(maxCol, col);
     });
-  }, [activeTileLocations, gridData.tiles, activeAuctions, selectedPlayerAddresses, tokenInfoCache, neighborCache, gridData, selectedLayer, selectedToken, showNotOwned, hideNotRecommended, durationCapHours, onTileClick]);
+
+    const width = maxCol - minCol + 1;
+    const height = maxRow - minRow + 1;
+
+    const items: InternalTileProps[] = [];
+
+    for (let row = minRow; row <= maxRow; row += 1) {
+      for (let col = minCol; col <= maxCol; col += 1) {
+        const location = encodeCoordinates(col, row);
+        const land = gridData.tiles[location] ?? null;
+        const auction = activeAuctions[location] ?? null;
+
+        const isHighlighted = land?.owner
+          ? selectedPlayerAddresses.has(land.owner.toLowerCase())
+          : false;
+
+        items.push({
+          row,
+          col,
+          gridRow: row - minRow + 1,
+          gridColumn: col - minCol + 1,
+          location,
+          land,
+          auction,
+          isHighlighted,
+          tokenInfoCache,
+          neighborCache,
+          gridData,
+          activeAuctions,
+          selectedLayer,
+          selectedToken,
+          showNotOwned,
+          hideNotRecommended,
+          durationCapHours,
+          config: _config,
+          onTileClick,
+        });
+      }
+    }
+
+    return {
+      tileProps: items,
+      gridWidth: width,
+      gridHeight: height,
+    };
+  }, [
+    activeTileLocations,
+    gridData.tiles,
+    activeAuctions,
+    selectedPlayerAddresses,
+    selectedLayer,
+    selectedToken,
+    showNotOwned,
+    hideNotRecommended,
+    durationCapHours,
+    tokenInfoCache,
+    neighborCache,
+    onTileClick,
+  ]);
 
   return (
     <GridContainer
       zoom={zoom}
       style={{
-        gridTemplateColumns: `repeat(${gridData.activeCols.length}, 100px)`,
-        gridTemplateRows: `repeat(${gridData.activeRows.length}, 100px)`,
-        marginLeft: '0', // No margin needed since MapWrapper handles the spacing
-        transition: 'margin-left 0.3s ease'
+        gridTemplateColumns: `repeat(${Math.max(gridWidth, 1)}, ${TILE_SIZE}px)`,
+        gridTemplateRows: `repeat(${Math.max(gridHeight, 1)}, ${TILE_SIZE}px)`,
       }}
     >
-      {tileProps.map((props) => (
-        <TileComponent key={`${props.row}-${props.col}`} {...props} />
+      {tileProps.map(({ gridRow, gridColumn, ...props }) => (
+        <div key={`${props.location}-${gridRow}-${gridColumn}`} style={{ gridRow, gridColumn }}>
+          <TileComponent {...props} />
+        </div>
       ))}
     </GridContainer>
   );

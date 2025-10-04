@@ -1,8 +1,8 @@
 import { useMemo } from 'react';
-import { PonziLand, PonziLandAuction, TokenPrice } from '../types/ponziland';
-import { hexToDecimal, calculateESTRKPrice, getTokenInfoCached } from '../utils/formatting';
+import { PonziLand, PonziLandAuction, PonziLandConfig, TokenPrice } from '../types/ponziland';
+import { convertToSTRK, getTokenInfoCached, type TokenInfo } from '../utils/formatting';
 import { CalculationEngine, LandCalculationContext } from '../utils/calculationEngine';
-import { calculateBurnRate, calculateTimeRemainingHours } from '../utils/taxCalculations';
+import { calculateBurnRate } from '../utils/taxCalculations';
 
 export interface PlayerStats {
   totalLandsOwned: number;
@@ -18,11 +18,12 @@ export const usePlayerStats = (
   selectedPlayerAddresses: Set<string>,
   gridData: { tiles: (PonziLand | null)[]; activeRows: number[]; activeCols: number[] },
   activeAuctions: Record<number, PonziLandAuction>,
-  tokenInfoCache: Map<string, { symbol: string; ratio: number | null }>,
+  tokenInfoCache: Map<string, TokenInfo>,
   neighborCache: Map<number, number[]>,
   activeTileLocations: Array<{ row: number; col: number; location: number }>,
-  prices: TokenPrice[],
-  durationCapHours: number
+  _prices: TokenPrice[],
+  _durationCapHours: number,
+  config: PonziLandConfig | null
 ): PlayerStats => {
   return useMemo(() => {
     // If no players selected, return empty stats
@@ -70,16 +71,16 @@ export const usePlayerStats = (
       totalLandsOwned++;
 
       // Calculate portfolio value (current ask price)
-      if (land.sell_price && land.sell_price !== '0x0') {
-        const tokenInfo = getTokenInfoCached(land.token_used, tokenInfoCache);
-        const landPriceESTRK = calculateESTRKPrice(land.sell_price, tokenInfo.ratio);
-        totalPortfolioValue += Number(landPriceESTRK);
-      }
+      const tokenInfo = getTokenInfoCached(land.token_used, tokenInfoCache);
 
-      // Calculate staked value
-      if (land.staked_amount) {
-        const stakedAmount = hexToDecimal(land.staked_amount);
-        totalStakedValue += Number(stakedAmount);
+      if (land.sell_price && land.sell_price !== '0x0') {
+        const landPriceSTRK = convertToSTRK(
+          land.sell_price,
+          tokenInfo.symbol,
+          tokenInfo.ratio,
+          tokenInfo.decimals,
+        );
+        totalPortfolioValue += landPriceSTRK;
       }
 
       // Calculate gross return using existing calculation engine
@@ -89,13 +90,22 @@ export const usePlayerStats = (
         gridData,
         tokenInfoCache,
         neighborCache,
-        activeAuctions
+        activeAuctions,
+        config
       };
 
       const yieldResult = CalculationEngine.calculateLandYield(context);
-      const tokenInfo = getTokenInfoCached(land.token_used, tokenInfoCache);
-      const landPriceESTRK = land.sell_price ? calculateESTRKPrice(land.sell_price, tokenInfo.ratio) : 0;
-      const grossReturn = Number(yieldResult.totalYield) + Number(landPriceESTRK);
+      const landPriceSTRK = land.sell_price
+        ? convertToSTRK(land.sell_price, tokenInfo.symbol, tokenInfo.ratio, tokenInfo.decimals)
+        : 0;
+      const stakedValueSTRK = convertToSTRK(
+        land.staked_amount || '0x0',
+        tokenInfo.symbol,
+        tokenInfo.ratio,
+        tokenInfo.decimals,
+      );
+      totalStakedValue += stakedValueSTRK;
+      const grossReturn = Number(yieldResult.totalYield) + landPriceSTRK;
       
       totalYield += grossReturn;
 
@@ -110,19 +120,21 @@ export const usePlayerStats = (
       }
 
       // Check for nukable risk (< 2h remaining)
-      if (land.staked_amount) {
-        const stakedAmount = hexToDecimal(land.staked_amount);
-        if (stakedAmount > 0) {
-          // Use existing burn rate calculation
-          const burnRate = calculateBurnRate(land, gridData.tiles, activeAuctions);
-          
-          if (burnRate > 0) {
-            const timeRemaining = calculateTimeRemainingHours(land, burnRate);
-            
-            if (timeRemaining < 2) { // Less than 2 hours
-              const riskDisplay = `Land ${location} (${coords})`;
-              nukableRiskLands.push({ location, timeRemaining, coords, display: riskDisplay });
-            }
+      if (stakedValueSTRK > 0) {
+        const burnRate = calculateBurnRate(
+          land,
+          gridData.tiles,
+          activeAuctions,
+          tokenInfoCache,
+          neighborCache,
+          config,
+        );
+
+        if (burnRate > 0) {
+          const timeRemaining = stakedValueSTRK / burnRate;
+          if (timeRemaining < 2) { // Less than 2 hours
+            const riskDisplay = `Land ${location} (${coords})`;
+            nukableRiskLands.push({ location, timeRemaining, coords, display: riskDisplay });
           }
         }
       }
@@ -137,5 +149,5 @@ export const usePlayerStats = (
       worstPerformingLand: worstLand,
       nukableRiskLands: nukableRiskLands.sort((a, b) => a.timeRemaining - b.timeRemaining)
     };
-  }, [selectedPlayerAddresses, gridData, activeAuctions, tokenInfoCache, neighborCache, activeTileLocations, prices, durationCapHours]);
+  }, [selectedPlayerAddresses, gridData, activeAuctions, tokenInfoCache, neighborCache, activeTileLocations, config]);
 };

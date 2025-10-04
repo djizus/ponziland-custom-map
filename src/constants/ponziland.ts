@@ -3,14 +3,23 @@ export const TAX_RATE_RAW = 2; // Represents 2%
 export const TIME_SPEED_FACTOR = 5;
 
 // Grid Constants
-export const GRID_SIZE = 64;
+export const GRID_SIZE = 256;
+
+// Coordinate system (matches official ponziland contracts/helpers)
+export const COORD_MULTIPLIER = 256; // 2^8, used to encode row in high bits
+export const COORD_MASK = 0xff; // Low 8 bits for column
+export const LOCATION_MASK = 0xffff; // 16-bit location index
+export const MAX_NEIGHBOR_COUNT = 8;
 
 // SQL API Configuration
 export const SQL_API_URL = import.meta.env.VITE_SQL_API_URL;
+export const PRICE_API_URL =
+  import.meta.env.VITE_PRICE_API_URL ?? '/api/price';
 
 // SQL Queries
 export const SQL_GET_PONZI_LANDS = `SELECT location, token_used, sell_price, owner, level FROM "ponzi_land-Land"`;
-export const SQL_GET_PONZI_LAND_AUCTIONS = `SELECT land_location, floor_price, start_time, start_price, decay_rate, is_finished FROM "ponzi_land-Auction"`;
+export const SQL_GET_PONZI_LAND_AUCTIONS = `SELECT land_location, floor_price, start_time, start_price, is_finished FROM "ponzi_land-Auction"`;
+export const SQL_GET_PONZI_CONFIG = `SELECT * FROM "ponzi_land-Config"`;
 export const SQL_GET_PONZI_LANDS_STAKE = `SELECT location, amount FROM "ponzi_land-LandStake"`;
 
 // Auction Constants
