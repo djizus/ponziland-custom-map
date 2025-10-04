@@ -107,4 +107,5 @@ export interface SelectedTileDetails {
   stakedTokenAmount?: number;
   timeRemainingHours?: number;
   saleTokenAmount?: number;
+  grossReturn?: number;
 }

@@ -227,6 +227,7 @@ const TileComponent = memo(({
     let effectivePrice = landPriceSTRK;
     let isRecommendedForPurchase = purchaseRecommendation.isRecommended;
     let recommendationMessage = purchaseRecommendation.recommendationReason;
+    const grossReturn = purchaseRecommendation.maxYield - purchaseRecommendation.requiredTotalTax;
     
     // Calculate net profit for purchasing layer
     const netProfit = purchaseRecommendation.maxYield - purchaseRecommendation.requiredTotalTax - purchaseRecommendation.currentPrice;
@@ -242,11 +243,11 @@ const TileComponent = memo(({
         // Purchasing layer: Show net profit
         displayYield = netProfit;
       } else if (selectedLayer === 'token') {
-        // Token layer: Show gross return (same as analysis layer)
-        displayYield = auctionYieldInfo.totalYield + effectivePrice;
+        // Token layer: Show gross return derived from purchase calculations
+        displayYield = grossReturn;
       } else {
-        // Analysis layer: Total yield + purchase price
-        displayYield = auctionYieldInfo.totalYield + effectivePrice;
+        // Analysis layer: Gross return derived from purchase calculations
+        displayYield = grossReturn;
       }
     } else {
       if (selectedLayer === 'yield') {
@@ -269,7 +270,7 @@ const TileComponent = memo(({
       selectedLayer === 'token' ?
         (isSelectedTokenTile ? displayYield : -1) : // Show gross return if selected token, gray otherwise
         (auction && auctionYieldInfo ? 
-          auctionYieldInfo.totalYield + (currentAuctionPriceForTileDisplay || 0) : 
+          grossReturn : 
           yieldInfo.totalYield + landPriceSTRK);
     
     const valueColor = land ? getValueColor(
@@ -296,6 +297,7 @@ const TileComponent = memo(({
       recommendationMessage,
       purchaseRecommendation,
       netProfit,
+      grossReturn,
       stakedValueSTRK,
       stakedTokenAmount,
       timeRemainingHours,
@@ -342,6 +344,7 @@ const TileComponent = memo(({
     stakedTokenAmount: tileData.stakedTokenAmount,
     timeRemainingHours: tileData.timeRemainingHours,
     saleTokenAmount: tileData.saleTokenAmount,
+    grossReturn: tileData.grossReturn,
   }), [location, col, row, land, auction, tileData, isHighlighted]);
 
   const handleClick = useCallback(() => {
@@ -390,6 +393,7 @@ const TileComponent = memo(({
               {tileData.auctionYieldInfo && (
                 <>
                   <div>Yield: {formatSignedStrk(tileData.auctionYieldInfo.yieldPerHour, 2)}/h</div>
+                  <div>Gross: {formatSignedStrk(tileData.grossReturn, 2)}</div>
                   <div style={{ color: tileData.auctionYieldInfo.yieldPerHour > 0 ? '#4CAF50' : '#ff6b6b' }}>
                     ROI: {tileData.auctionROIForDetails?.toFixed(1) || '0.0'}%/h
                   </div>

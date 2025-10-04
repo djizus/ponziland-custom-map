@@ -6,8 +6,52 @@ import { logError } from '../utils/errorHandler';
 import { apiClient } from '../utils/apiClient';
 import { useAdaptivePolling } from '../utils/adaptivePolling';
 
+const TOKEN_PRICE_CACHE_KEY = 'ponziland:last-token-prices';
+
+const loadCachedPrices = (): TokenPrice[] => {
+  if (typeof window === 'undefined') {
+    return [];
+  }
+
+  try {
+    const raw = window.localStorage.getItem(TOKEN_PRICE_CACHE_KEY);
+    if (!raw) {
+      return [];
+    }
+
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    return parsed.filter((item: any) =>
+      item && typeof item === 'object' && typeof item.symbol === 'string' && typeof item.address === 'string');
+  } catch (error) {
+    logError('PRICE_CACHE_LOAD', error, {
+      component: 'useDataFetching',
+      operation: 'loadCachedPrices'
+    });
+    return [];
+  }
+};
+
+const persistPrices = (prices: TokenPrice[]) => {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(TOKEN_PRICE_CACHE_KEY, JSON.stringify(prices));
+  } catch (error) {
+    logError('PRICE_CACHE_SAVE', error, {
+      component: 'useDataFetching',
+      operation: 'persistPrices'
+    });
+  }
+};
+
 export const useDataFetching = () => {
-  const [prices, setPrices] = useState<TokenPrice[]>([]);
+  const [prices, setPrices] = useState<TokenPrice[]>(() => loadCachedPrices());
   const [landsSqlData, setLandsSqlData] = useState<PonziLand[]>([]);
   const [auctionsSqlData, setAuctionsSqlData] = useState<PonziLandAuction[]>([]);
   const [stakesSqlData, setStakesSqlData] = useState<PonziLandStake[]>([]);
@@ -22,8 +66,9 @@ export const useDataFetching = () => {
       const data = await apiClient.fetchPrices();
       
       setPrices(prevPrices => {
-        if (!comparePricesArrays(prevPrices, data)) {
+        if (Array.isArray(data) && data.length > 0 && !comparePricesArrays(prevPrices, data)) {
           performanceCache.updatePricesVersion();
+          persistPrices(data);
           return data;
         }
         return prevPrices;

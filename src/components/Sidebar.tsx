@@ -280,6 +280,26 @@ const Sidebar = memo(({
     ? selectedTileData.currentAuctionPriceSTRK ?? calculateAuctionPrice(selectedTileData.auction, config || undefined)
     : undefined;
 
+  const grossReturnForDisplay = useMemo(() => {
+    if (!selectedTileData) {
+      return 0;
+    }
+
+    if (selectedTileData.grossReturn !== undefined) {
+      return selectedTileData.grossReturn;
+    }
+
+    if (selectedTileData.auction) {
+      const basePrice = currentAuctionPrice ?? 0;
+      const auctionTotalYield = selectedTileData.auctionYieldInfo?.totalYield ?? 0;
+      return auctionTotalYield + basePrice;
+    }
+
+    const landPrice = selectedTileData.landPriceSTRK ?? 0;
+    const totalYield = selectedTileData.yieldInfo?.totalYield ?? 0;
+    return totalYield + landPrice;
+  }, [selectedTileData, currentAuctionPrice]);
+
   return (
     <SidebarContainer>
       {/* Sidebar Header */}
@@ -662,8 +682,8 @@ const Sidebar = memo(({
                                       </InfoLine>
                                       <InfoLine>
                                         <span>Gross Return:</span>
-                                        <span style={{ color: (selectedTileData.auctionYieldInfo.totalYield + (currentAuctionPrice || 0)) > 0 ? '#4CAF50' : '#ff6b6b' }}>
-                                          {formatSignedStrk(selectedTileData.auctionYieldInfo.totalYield + (currentAuctionPrice || 0), 1)} STRK
+                                        <span style={{ color: grossReturnForDisplay > 0 ? '#4CAF50' : '#ff6b6b' }}>
+                                          {formatSignedStrk(grossReturnForDisplay, 1)} STRK
                                         </span>
                                       </InfoLine>
                                       <InfoLine>
