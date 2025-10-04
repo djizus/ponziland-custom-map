@@ -2,12 +2,13 @@ import { memo, useMemo, useCallback } from 'react';
 import { PonziLand, PonziLandAuction, SelectedTileDetails, PonziLandConfig, YieldInfo, MapLayer } from '../types/ponziland';
 import {
   getTokenInfoCached,
-  formatOriginalPrice,
   hexToDecimal,
   displayCoordinates,
   formatTimeRemaining,
   convertToSTRK,
   formatStrkAmount,
+  BASE_TOKEN_SYMBOL,
+  formatTokenAmount,
   normalizeTokenAddress,
   type TokenInfo,
 } from '../utils/formatting';
@@ -180,6 +181,13 @@ const TileComponent = memo(({
       config,
     );
     const landPriceSTRK = land ? convertToSTRK(land.sell_price, symbol, ratio, decimals) : 0;
+    const saleTokenAmount = land
+      ? symbol === BASE_TOKEN_SYMBOL
+        ? landPriceSTRK
+        : ratio && ratio > 0
+          ? landPriceSTRK * ratio
+          : undefined
+      : undefined;
     const burnRate = land ? calculateBurnRate(land, gridData.tiles, activeAuctions, tokenInfoCache, neighborCache, config) : 0;
     const stakedTokenAmount = land ? hexToDecimal(land.staked_amount || '0x0', decimals) : 0;
     const stakedValueSTRK = land
@@ -291,6 +299,7 @@ const TileComponent = memo(({
       stakedValueSTRK,
       stakedTokenAmount,
       timeRemainingHours,
+      saleTokenAmount,
       tokenDecimals: decimals,
     };
   }, [
@@ -332,6 +341,7 @@ const TileComponent = memo(({
     currentAuctionPriceSTRK: tileData.currentAuctionPriceForTileDisplay,
     stakedTokenAmount: tileData.stakedTokenAmount,
     timeRemainingHours: tileData.timeRemainingHours,
+    saleTokenAmount: tileData.saleTokenAmount,
   }), [location, col, row, land, auction, tileData, isHighlighted]);
 
   const handleClick = useCallback(() => {
@@ -412,12 +422,28 @@ const TileComponent = memo(({
             <CompactTaxInfo>
               {land.sell_price ? (
                 <>
-                  <div>
-                    {formatOriginalPrice(land.sell_price, tileData.tokenDecimals ?? 18, {
-                      compact: true,
-                      tokenDecimals: tileData.tokenDecimals ?? 18,
-                    })} {tileData.symbol} ({formatStrkValue(tileData.landPriceSTRK, 2)} STRK)
-                  </div>
+                  {(() => {
+                    const lines: string[] = [];
+                    const basePriceDisplay = `${formatTokenAmount(tileData.landPriceSTRK, { decimals: 2, compact: false })} STRK`;
+
+                    if (
+                      tileData.saleTokenAmount !== undefined &&
+                      tileData.symbol !== BASE_TOKEN_SYMBOL
+                    ) {
+                      const formattedTokenAmount = formatTokenAmount(
+                        tileData.saleTokenAmount,
+                        { decimals: 2 },
+                      );
+                      lines.push(`${formattedTokenAmount} ${tileData.symbol}`);
+                      lines.push(basePriceDisplay);
+                    } else {
+                      lines.push(basePriceDisplay);
+                    }
+
+                    return lines.map((line, idx) => (
+                      <div key={`sale-line-${idx}`}>{line}</div>
+                    ));
+                  })()}
                   <div>Yield: {formatSignedStrk(tileData.yieldInfo.yieldPerHour, 2)}/h</div>
                   <div style={{ color: tileData.yieldInfo.yieldPerHour > 0 ? '#4CAF50' : '#ff6b6b' }}>
                     ROI: {calculateROI(tileData.yieldInfo.yieldPerHour, tileData.landPriceSTRK).toFixed(2)}%/h

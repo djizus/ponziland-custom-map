@@ -133,9 +133,10 @@ const Sidebar = memo(({
       ? decimals
       : Math.min(6, Math.max(decimals, Math.ceil(-Math.log10(abs)) + 1));
 
-    return value.toLocaleString(undefined, {
+    return value.toLocaleString('en-US', {
       minimumFractionDigits: dynamicDecimals,
       maximumFractionDigits: dynamicDecimals,
+      useGrouping: false,
     });
   }, []);
   const formatSignedStrk = useCallback((value: number, decimals = 2) => {

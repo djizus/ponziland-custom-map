@@ -107,26 +107,51 @@ const DEFAULT_TOKEN_INFO: TokenInfo = {
   decimals: 18,
 };
 
-export const formatTokenAmount = (value: number | string, decimals = 2): string => {
+interface FormatTokenAmountOptions {
+  decimals?: number;
+  compact?: boolean;
+}
+
+export const formatTokenAmount = (
+  value: number | string,
+  decimalsOrOptions?: number | FormatTokenAmountOptions,
+): string => {
+  let decimals = 2;
+  let compact = true;
+
+  if (typeof decimalsOrOptions === 'number') {
+    decimals = decimalsOrOptions;
+  } else if (typeof decimalsOrOptions === 'object' && decimalsOrOptions) {
+    decimals = decimalsOrOptions.decimals ?? decimals;
+    compact = decimalsOrOptions.compact ?? compact;
+  }
+
+  const baseDecimals = Math.max(0, decimals);
+  const decimalsForLarge = Math.min(baseDecimals, 4);
+  const zeroValue = decimalsForLarge > 0
+    ? `0.${'0'.repeat(decimalsForLarge)}`
+    : '0';
+
   const numericValue = typeof value === 'number' ? value : Number(value);
 
   if (!Number.isFinite(numericValue) || numericValue === 0) {
-    return '0';
+    return zeroValue;
   }
 
   const abs = Math.abs(numericValue);
 
-  if (abs >= 1_000) {
-    return formatCompactNumber(numericValue, 2);
+  if (compact && abs >= 1_000) {
+    return formatCompactNumber(numericValue, decimalsForLarge || 2);
   }
 
   const dynamicDecimals = abs >= 1
-    ? Math.min(decimals, 4)
-    : Math.min(6, Math.max(decimals, Math.ceil(-Math.log10(abs)) + 1));
+    ? decimalsForLarge
+    : Math.min(6, Math.max(baseDecimals, Math.ceil(-Math.log10(abs)) + 1));
 
-  return numericValue.toLocaleString(undefined, {
+  return numericValue.toLocaleString('en-US', {
     minimumFractionDigits: dynamicDecimals,
     maximumFractionDigits: dynamicDecimals,
+    useGrouping: false,
   });
 };
 
