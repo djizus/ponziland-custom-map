@@ -203,6 +203,8 @@ const Sidebar = memo(({
       ?? (landTokenAddress ? selectedTileData.symbol : BASE_TOKEN_SYMBOL);
     const tokenDecimals = landMetadata?.decimals ?? selectedTileData.tokenDecimals ?? 6;
 
+    const tokenIsStrk = tokenSymbol.toUpperCase() === BASE_TOKEN_SYMBOL;
+
     const burnRateToken = burnRateStrk > 0 && tokenAmount > 0 && stakedStrk > 0
       ? burnRateStrk * (tokenAmount / stakedStrk)
       : 0;
@@ -210,8 +212,29 @@ const Sidebar = memo(({
     const amountTokenStr = `${formatTokenAmount(tokenAmount, tokenDecimals)} ${tokenSymbol}`;
     const burnTokenStr = `${formatTokenAmount(burnRateToken, tokenDecimals)} ${tokenSymbol}`;
 
-    const amount = `${amountTokenStr} (${formatStrkValue(stakedStrk, 2)} STRK)`;
-    const burnRate = `${burnTokenStr} (${formatStrkValue(burnRateStrk, 2)} STRK)/h`;
+    const effectiveStrk = stakedStrk > 0
+      ? stakedStrk
+      : (tokenIsStrk ? tokenAmount : 0);
+
+    const amount = tokenIsStrk
+      ? `${formatStrkValue(effectiveStrk, 2)} STRK`
+      : tokenAmount > 0 && effectiveStrk > 0
+        ? `${amountTokenStr} (${formatStrkValue(effectiveStrk, 2)} STRK)`
+        : tokenAmount > 0
+          ? amountTokenStr
+          : `${formatStrkValue(effectiveStrk, 2)} STRK`;
+
+    const effectiveBurnStrk = burnRateStrk > 0
+      ? burnRateStrk
+      : (tokenIsStrk ? burnRateToken : 0);
+
+    const burnRate = tokenIsStrk
+      ? `${formatStrkValue(effectiveBurnStrk, 2)} STRK/h`
+      : burnRateToken > 0 && effectiveBurnStrk > 0
+        ? `${burnTokenStr} (${formatStrkValue(effectiveBurnStrk, 2)} STRK)/h`
+        : burnRateToken > 0
+          ? `${burnTokenStr}/h`
+          : `${formatStrkValue(effectiveBurnStrk, 2)} STRK/h`;
 
     return {
       amount,

@@ -92,7 +92,7 @@ export class CalculationEngine {
     auctionPrice: number,
     myTimeRemaining: number = 48
   ): YieldCalculationResult {
-    const { location, land, neighborCache, config } = context;
+    const { land } = context;
     
     if (!land) {
       return {
@@ -105,43 +105,35 @@ export class CalculationEngine {
     }
 
     const neighborDetails = this.calculateNeighborDetails(context);
-    const myTaxRate = getTaxRateCached(land.level, location, neighborCache, config);
     
     // Calculate hourly rates
     let taxReceived = 0;
-    let taxPaid = 0;
     let longestNeighborDuration = 0;
 
     neighborDetails.forEach(neighbor => {
       taxReceived += neighbor.hourlyTax;
-      taxPaid += auctionPrice * myTaxRate;
       longestNeighborDuration = Math.max(longestNeighborDuration, neighbor.timeRemaining);
     });
 
-    const yieldPerHour = taxReceived - taxPaid;
+    const yieldPerHour = taxReceived;
     const effectiveTimeRemaining = Math.max(longestNeighborDuration, myTimeRemaining);
     
     // Calculate time-based total yield
     let totalYieldReceived = 0;
-    let totalTaxPaid = 0;
 
     neighborDetails.forEach(neighbor => {
       if (neighbor.timeRemaining > 0) {
         const taxReceivingDuration = Math.min(effectiveTimeRemaining, neighbor.timeRemaining);
         totalYieldReceived += neighbor.hourlyTax * taxReceivingDuration;
-        
-        const hourlyTaxPaid = auctionPrice * myTaxRate;
-        const taxPaymentDuration = Math.min(effectiveTimeRemaining, neighbor.timeRemaining);
-        totalTaxPaid += hourlyTaxPaid * taxPaymentDuration;
       }
     });
 
-    const totalYield = totalYieldReceived - totalTaxPaid - auctionPrice;
+    const totalYield = totalYieldReceived - auctionPrice;
 
     return {
       yieldPerHour,
       totalYield,
-      taxPaidTotal: totalTaxPaid,
+      taxPaidTotal: 0,
       longestNeighborDuration,
       neighborDetails
     };
