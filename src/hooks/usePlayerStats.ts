@@ -9,6 +9,8 @@ export interface PlayerStats {
   totalPortfolioValue: number;
   totalStakedValue: number;
   totalYield: number;
+  totalYieldPerHour: number;
+  totalYieldPerHourUSD: number | null;
   bestPerformingLand: { location: number; grossReturn: number; coords: string; display: string } | null;
   worstPerformingLand: { location: number; grossReturn: number; coords: string; display: string } | null;
   nukableRiskLands: Array<{ location: number; timeRemaining: number; coords: string; display: string }>;
@@ -21,11 +23,22 @@ export const usePlayerStats = (
   tokenInfoCache: Map<string, TokenInfo>,
   neighborCache: Map<number, number[]>,
   activeTileLocations: Array<{ row: number; col: number; location: number }>,
-  _prices: TokenPrice[],
+  prices: TokenPrice[],
   _durationCapHours: number,
   config: PonziLandConfig | null
 ): PlayerStats => {
   return useMemo(() => {
+    const usdStableSymbols = ['USDC', 'USDT', 'DAI'];
+    const strkUsdRate = (() => {
+      for (const stable of usdStableSymbols) {
+        const token = prices.find(p => (p.symbol || '').toUpperCase() === stable);
+        if (token?.ratio && token.ratio > 0) {
+          return token.ratio;
+        }
+      }
+      return null;
+    })();
+
     // If no players selected, return empty stats
     if (selectedPlayerAddresses.size === 0) {
       return {
@@ -33,6 +46,8 @@ export const usePlayerStats = (
         totalPortfolioValue: 0,
         totalStakedValue: 0,
         totalYield: 0,
+        totalYieldPerHour: 0,
+        totalYieldPerHourUSD: strkUsdRate ? 0 : null,
         bestPerformingLand: null,
         worstPerformingLand: null,
         nukableRiskLands: []
@@ -43,6 +58,7 @@ export const usePlayerStats = (
     let totalPortfolioValue = 0;
     let totalStakedValue = 0;
     let totalYield = 0;
+    let totalYieldPerHour = 0;
     let bestLand: { location: number; grossReturn: number; coords: string; display: string } | null = null;
     let worstLand: { location: number; grossReturn: number; coords: string; display: string } | null = null;
     const nukableRiskLands: Array<{ location: number; timeRemaining: number; coords: string; display: string }> = [];
@@ -108,6 +124,7 @@ export const usePlayerStats = (
       const grossReturn = Number(yieldResult.totalYield) + landPriceSTRK;
       
       totalYield += grossReturn;
+      totalYieldPerHour += Number.isFinite(yieldResult.yieldPerHour) ? yieldResult.yieldPerHour : 0;
 
       // Track best and worst performing lands
       const coords = getCoordinates(row, col);
@@ -145,9 +162,11 @@ export const usePlayerStats = (
       totalPortfolioValue,
       totalStakedValue,
       totalYield,
+      totalYieldPerHour,
+      totalYieldPerHourUSD: strkUsdRate ? totalYieldPerHour * strkUsdRate : null,
       bestPerformingLand: bestLand,
       worstPerformingLand: worstLand,
       nukableRiskLands: nukableRiskLands.sort((a, b) => a.timeRemaining - b.timeRemaining)
     };
-  }, [selectedPlayerAddresses, gridData, activeAuctions, tokenInfoCache, neighborCache, activeTileLocations, config]);
+  }, [selectedPlayerAddresses, gridData, activeAuctions, tokenInfoCache, neighborCache, activeTileLocations, config, prices]);
 };

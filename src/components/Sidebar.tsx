@@ -148,6 +148,19 @@ const Sidebar = memo(({
     return `${sign}${formatStrkValue(Math.abs(value), decimals)}`;
   }, [formatStrkValue]);
 
+  const formatUsdValue = useCallback((value: number, decimals = 2) => {
+    if (!Number.isFinite(value)) {
+      return '$0.00';
+    }
+
+    return value.toLocaleString('en-US', {
+      style: 'currency',
+      currency: 'USD',
+      minimumFractionDigits: decimals,
+      maximumFractionDigits: decimals,
+    });
+  }, []);
+
   const formatValueInToken = useCallback(
     (valueStrk: number, tokenAddress?: string, preferToken = false) => {
       const formattedStrk = `${formatStrkValue(valueStrk, 2)} STRK`;
@@ -484,6 +497,17 @@ const Sidebar = memo(({
                       <InfoLine style={{ marginBottom: '4px' }}>
                         <InfoLabel>Lands Owned:</InfoLabel>
                         <InfoValue>{playerStats.totalLandsOwned}</InfoValue>
+                      </InfoLine>
+                      <InfoLine style={{ marginBottom: '4px' }}>
+                        <InfoLabel>Yield / Hour:</InfoLabel>
+                        <InfoValue>
+                          {formatStrkValue(playerStats.totalYieldPerHour, 2)} STRK/h
+                          {playerStats.totalYieldPerHourUSD !== null && (
+                            <span style={{ marginLeft: '6px', color: '#bbb' }}>
+                              (≈ {formatUsdValue(playerStats.totalYieldPerHourUSD, 2)}/h)
+                            </span>
+                          )}
+                        </InfoValue>
                       </InfoLine>
                       <InfoLine style={{ marginBottom: '4px' }}>
                         <InfoLabel>Portfolio Value:</InfoLabel>
