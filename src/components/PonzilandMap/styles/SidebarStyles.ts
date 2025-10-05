@@ -158,7 +158,7 @@ export const LoadingMessage = styled.div`
 export const TokenList = styled.div`
   ${mixins.flexColumn}
   gap: ${theme.spacing.xs};
-  max-height: 150px;
+  max-height: 720px;
   overflow-y: auto;
   ${mixins.scrollbar}
 `;

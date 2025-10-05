@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { SelectedTileDetails, MapLayer } from '../types/ponziland';
 
 // Import custom hooks
@@ -17,7 +17,7 @@ import ErrorBoundary from './ErrorBoundary';
 import { MapWrapper, GridWrapper } from './PonzilandMap/styles/MapStyles';
 
 import { safeLocalStorage } from '../utils/errorHandler';
-import { normalizeTokenAddress } from '../utils/formatting';
+import { normalizeTokenAddress, BASE_TOKEN_SYMBOL } from '../utils/formatting';
 
 // Move utility function outside component to avoid recreation
 const loadPersistedState = <T,>(key: string, defaultValue: T): T => {
@@ -52,8 +52,8 @@ const PonzilandMap = () => {
   
   // Sidebar is now always visible and non-collapsible
   
-  const [activeTab, setActiveTab] = useState<'map' | 'analysis'>(
-    () => loadPersistedState<'map' | 'analysis'>('ponziland-active-tab', 'map')
+  const [activeTab, setActiveTab] = useState<'map' | 'analysis' | 'settings' | 'prices'>(
+    () => loadPersistedState<'map' | 'analysis' | 'settings' | 'prices'>('ponziland-active-tab', 'map')
   );
   
   const [selectedTileData, setSelectedTileData] = useState<SelectedTileDetails | null>(null);
@@ -65,6 +65,11 @@ const PonzilandMap = () => {
   const [selectedToken, setSelectedToken] = useState<string>(
     () => normalizeTokenAddress(loadPersistedState<string>('ponziland-selected-token', ''))
   );
+
+  const [referenceCurrency, setReferenceCurrency] = useState<string>(() => {
+    const persisted = loadPersistedState<string>('ponziland-reference-currency', BASE_TOKEN_SYMBOL);
+    return (persisted || BASE_TOKEN_SYMBOL).toUpperCase();
+  });
 
   // Auto-select STRK when tokens are loaded and no token is selected
   useEffect(() => {
@@ -91,6 +96,35 @@ const PonzilandMap = () => {
     () => loadPersistedState<boolean>('ponziland-show-not-owned', false)
   );
 
+  const referenceRate = useMemo(() => {
+    const target = referenceCurrency?.toUpperCase();
+    if (!target || target === BASE_TOKEN_SYMBOL) {
+      return 1;
+    }
+
+    const token = prices.find(p => (p.symbol || '').toUpperCase() === target);
+    if (token?.ratio && token.ratio > 0) {
+      return token.ratio;
+    }
+
+    return null;
+  }, [referenceCurrency, prices]);
+
+  const handleReferenceCurrencyChange = useCallback((currency: string) => {
+    if (!currency) {
+      setReferenceCurrency(BASE_TOKEN_SYMBOL);
+      return;
+    }
+
+    setReferenceCurrency(currency.toUpperCase());
+  }, []);
+
+  useEffect(() => {
+    if (referenceCurrency !== BASE_TOKEN_SYMBOL && (referenceRate === null || referenceRate === undefined)) {
+      handleReferenceCurrencyChange(BASE_TOKEN_SYMBOL);
+    }
+  }, [referenceCurrency, referenceRate, handleReferenceCurrencyChange]);
+
   // Use player stats hook
   const playerStats = usePlayerStats(
     selectedPlayerAddresses,
@@ -105,7 +139,18 @@ const PonzilandMap = () => {
   );
 
   // Use persistence hook (sidebar always visible now)
-  usePersistence(selectedPlayerAddresses, selectedLayer, selectedLayer === 'yield', false, activeTab, durationCapHours, selectedToken, selectedStakeToken, showNotOwned);
+  usePersistence(
+    selectedPlayerAddresses,
+    selectedLayer,
+    selectedLayer === 'yield',
+    false,
+    activeTab,
+    durationCapHours,
+    selectedToken,
+    selectedStakeToken,
+    showNotOwned,
+    referenceCurrency,
+  );
 
   // Event handlers
   const handleTileClick = useCallback((tileDetails: SelectedTileDetails) => {
@@ -115,7 +160,7 @@ const PonzilandMap = () => {
 
   // Sidebar toggle removed since it's always visible
 
-  const handleTabChange = useCallback((tab: 'map' | 'analysis') => {
+  const handleTabChange = useCallback((tab: 'map' | 'analysis' | 'settings' | 'prices') => {
     setActiveTab(tab);
   }, []);
 
@@ -197,6 +242,9 @@ const PonzilandMap = () => {
         onShowNotOwnedChange={setShowNotOwned}
         onDurationCapChange={handleDurationCapChange}
         onPlayerSelectionChange={handlePlayerSelectionChange}
+        referenceCurrency={referenceCurrency}
+        referenceRate={referenceRate}
+        onReferenceCurrencyChange={handleReferenceCurrencyChange}
         />
       </ErrorBoundary>
 
@@ -218,6 +266,8 @@ const PonzilandMap = () => {
           zoom={zoom}
           config={configSqlData}
           onTileClick={handleTileClick}
+          referenceCurrency={referenceCurrency}
+          referenceRate={referenceRate}
           />
         </ErrorBoundary>
       </GridWrapper>

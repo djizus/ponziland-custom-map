@@ -10,6 +10,7 @@ import {
   BASE_TOKEN_SYMBOL,
   formatTokenAmount,
   normalizeTokenAddress,
+  convertStrkToReference,
   type TokenInfo,
 } from '../utils/formatting';
 import { getLevelNumber } from '../utils/dataProcessing';
@@ -107,11 +108,13 @@ interface TileComponentProps {
   durationCapHours: number;
   config: PonziLandConfig | null;
   onTileClick: (tileDetails: SelectedTileDetails) => void;
+  referenceCurrency: string;
+  referenceRate: number | null;
 }
 
 const TileComponent = memo(({ 
   row, col, location, land, auction, isHighlighted, tokenInfoCache, neighborCache, 
-  gridData, activeAuctions, selectedLayer, selectedToken, showNotOwned, hideNotRecommended, durationCapHours, config, onTileClick 
+  gridData, activeAuctions, selectedLayer, selectedToken, showNotOwned, hideNotRecommended, durationCapHours, config, onTileClick, referenceCurrency, referenceRate 
 }: TileComponentProps) => {
   // Use custom hook for expensive auction calculations
   const auctionCalculations = useAuctionCalculations(
@@ -126,31 +129,43 @@ const TileComponent = memo(({
   );
 
   // Extract relevant tiles to minimize dependencies
-  const formatStrkValue = useCallback(
+  const normalizedReferenceCurrency = (referenceCurrency || BASE_TOKEN_SYMBOL).toUpperCase();
+
+  const formatReferenceValue = useCallback(
     (value: number, decimals = 2) => {
-      if (!Number.isFinite(value) || value === 0) {
+      const converted = convertStrkToReference(value, {
+        referenceSymbol: normalizedReferenceCurrency,
+        referenceRate,
+      });
+
+      if (!Number.isFinite(converted) || converted === 0) {
         return '0';
       }
 
-      const abs = Math.abs(value);
+      const abs = Math.abs(converted);
       const dynamicDecimals = abs >= 1
         ? decimals
         : Math.min(6, Math.max(decimals, Math.ceil(-Math.log10(abs)) + 1));
 
-      return formatStrkAmount(value, { decimals: dynamicDecimals, compact: true });
+      return formatStrkAmount(converted, { decimals: dynamicDecimals, compact: true });
     },
-    [],
+    [normalizedReferenceCurrency, referenceRate],
   );
 
-  const formatSignedStrk = useCallback(
+  const formatSignedReference = useCallback(
     (value: number, decimals = 2) => {
-      if (!Number.isFinite(value) || value === 0) {
-        return formatStrkValue(0, decimals);
+      const converted = convertStrkToReference(value, {
+        referenceSymbol: normalizedReferenceCurrency,
+        referenceRate,
+      });
+
+      if (!Number.isFinite(converted) || converted === 0) {
+        return formatReferenceValue(0, decimals);
       }
-      const sign = value > 0 ? '+' : '-';
-      return `${sign}${formatStrkValue(Math.abs(value), decimals)}`;
+      const sign = converted > 0 ? '+' : '-';
+      return `${sign}${formatReferenceValue(Math.abs(value), decimals)}`;
     },
-    [formatStrkValue],
+    [formatReferenceValue, normalizedReferenceCurrency, referenceRate],
   );
 
   const landTokenAddress = useMemo(() => (
@@ -384,16 +399,16 @@ const TileComponent = memo(({
                 ? tileData.auctionYieldInfo
                   ? (!tileData.isRecommendedForPurchase
                       ? tileData.recommendationMessage
-                      : formatSignedStrk(tileData.displayYield, 1))
+                      : formatSignedReference(tileData.displayYield, 1))
                   : 'AUCTION'
                 : 'AUCTION'}
             </TileHeader>
             <CompactTaxInfo>
-              <div>{tileData.currentAuctionPriceForTileDisplay !== undefined ? `${formatStrkValue(tileData.currentAuctionPriceForTileDisplay, 2)} STRK` : 'N/A'}</div>
+              <div>{tileData.currentAuctionPriceForTileDisplay !== undefined ? `${formatReferenceValue(tileData.currentAuctionPriceForTileDisplay, 2)} ${normalizedReferenceCurrency}` : 'N/A'}</div>
               {tileData.auctionYieldInfo && (
                 <>
-                  <div>Yield: {formatSignedStrk(tileData.auctionYieldInfo.yieldPerHour, 2)}/h</div>
-                  <div>Gross: {formatSignedStrk(tileData.grossReturn, 2)}</div>
+                  <div>Yield: {formatSignedReference(tileData.auctionYieldInfo.yieldPerHour, 2)}/h</div>
+                  <div>Gross: {formatSignedReference(tileData.grossReturn, 2)}</div>
                   <div style={{ color: tileData.auctionYieldInfo.yieldPerHour > 0 ? '#4CAF50' : '#ff6b6b' }}>
                     ROI: {tileData.auctionROIForDetails?.toFixed(1) || '0.0'}%/h
                   </div>
@@ -420,7 +435,7 @@ const TileComponent = memo(({
               {selectedLayer === 'yield' && !tileData.isRecommendedForPurchase
                 ? tileData.recommendationMessage
                 : tileData.displayYield !== 0
-                  ? formatSignedStrk(tileData.displayYield, 1)
+                  ? formatSignedReference(tileData.displayYield, 1)
                   : ''}
             </TileHeader>
             <CompactTaxInfo>
@@ -428,7 +443,7 @@ const TileComponent = memo(({
                 <>
                   {(() => {
                     const lines: string[] = [];
-                    const basePriceDisplay = `${formatTokenAmount(tileData.landPriceSTRK, { decimals: 2, compact: false })} STRK`;
+                    const basePriceDisplay = `${formatReferenceValue(tileData.landPriceSTRK, 2)} ${normalizedReferenceCurrency}`;
 
                     if (
                       tileData.saleTokenAmount !== undefined &&
@@ -448,7 +463,7 @@ const TileComponent = memo(({
                       <div key={`sale-line-${idx}`}>{line}</div>
                     ));
                   })()}
-                  <div>Yield: {formatSignedStrk(tileData.yieldInfo.yieldPerHour, 2)}/h</div>
+                  <div>Yield: {formatSignedReference(tileData.yieldInfo.yieldPerHour, 2)}/h</div>
                   <div style={{ color: tileData.yieldInfo.yieldPerHour > 0 ? '#4CAF50' : '#ff6b6b' }}>
                     ROI: {calculateROI(tileData.yieldInfo.yieldPerHour, tileData.landPriceSTRK).toFixed(2)}%/h
                   </div>

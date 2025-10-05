@@ -524,78 +524,69 @@ export const calculatePurchaseRecommendation = (
   
   let recommendedPrice = currentPrice;
 
-  // Calculate required tax payments - accounting for when each neighbor gets nuked
-  let requiredTaxPerHour = recommendedPrice * myTaxRate;
-  let requiredTotalTax = 0;
-  
-  // Calculate tax paid to each neighbor until they get nuked
-  neighbors.forEach(neighborLoc => {
-    const neighbor = lands[neighborLoc];
-    if (neighbor && !activeAuctions[neighborLoc] && neighbor.owner) {
-      const neighborBurnRate = calculateBurnRate(neighbor, lands, activeAuctions, tokenCache, neighborCache, config);
-      const neighborTimeRemaining = calculateTimeRemainingHours(neighbor, neighborBurnRate);
-      
-      if (neighborTimeRemaining > 0) {
-        // We pay tax to this neighbor until either they get nuked or we reach our duration cap
-        const taxPaymentDuration = Math.min(durationCapHours, neighborTimeRemaining);
-        requiredTotalTax += requiredTaxPerHour * taxPaymentDuration;
-      }
-    }
-  });
-  
-  // Calculate required stake in STRK (always display in STRK for consistency)
-  let requiredStakeForFullYield = requiredTotalTax;
+  const calculateTaxTotals = (priceBasis: number) => {
+    const taxPerHour = priceBasis * myTaxRate;
+    let totalTax = 0;
 
-  // Calculate net profit
-  let grossProfit = neighborYields.totalYield;
-  let netProfit = grossProfit - requiredTotalTax - currentPrice;
-
-  // Determine recommendation
-  let isRecommended = false;
-  let recommendationReason = '';
-
-  if (neighborYields.yieldPerHour <= 0) {
-    recommendationReason = 'No yield potential';
-  } else if (netProfit <= currentPrice * 0.02) {
-    recommendationReason = 'Low profitability';
-  } else {
-    isRecommended = true;
-    recommendationReason = 'Profitable';
-    // Calculate recommended price using conservative 2-hour strategy
-    // yield_first_2h = guaranteed yield in first 2 hours
-    // remaining_yield = risky longer-term yield
-    let yield_first_1h = 0;
-    neighborYields.neighborDetails.forEach(neighbor => {
-      const safeYieldDuration = Math.min(1, neighbor.timeRemaining);
-      yield_first_1h += neighbor.hourlyYield * safeYieldDuration;
-    });
-    recommendedPrice = currentPrice + (yield_first_1h * 0.8);
-
-    // Calculate required tax payments - accounting for when each neighbor gets nuked
-    requiredTaxPerHour = recommendedPrice * myTaxRate;
-    requiredTotalTax = 0;
-    
-    // Calculate tax paid to each neighbor until they get nuked
     neighbors.forEach(neighborLoc => {
       const neighbor = lands[neighborLoc];
       if (neighbor && !activeAuctions[neighborLoc] && neighbor.owner) {
         const neighborBurnRate = calculateBurnRate(neighbor, lands, activeAuctions, tokenCache, neighborCache, config);
         const neighborTimeRemaining = calculateTimeRemainingHours(neighbor, neighborBurnRate);
-        
+
         if (neighborTimeRemaining > 0) {
-          // We pay tax to this neighbor until either they get nuked or we reach our duration cap
           const taxPaymentDuration = Math.min(durationCapHours, neighborTimeRemaining);
-          requiredTotalTax += requiredTaxPerHour * taxPaymentDuration;
+          totalTax += taxPerHour * taxPaymentDuration;
         }
       }
     });
-    
-    // Calculate required stake in STRK (always display in STRK for consistency)
-    requiredStakeForFullYield = requiredTotalTax;
-  
-    // Calculate net profit
-    grossProfit = neighborYields.totalYield;
-    netProfit = grossProfit - requiredTotalTax - currentPrice;
+
+    return { taxPerHour, totalTax };
+  };
+
+  const initialTax = calculateTaxTotals(currentPrice);
+  let requiredTaxPerHour = initialTax.taxPerHour;
+  let requiredTotalTax = initialTax.totalTax;
+  let requiredStakeForFullYield = requiredTotalTax;
+
+  const grossProfit = neighborYields.totalYield;
+  let netProfit = grossProfit - requiredTotalTax - currentPrice;
+
+  let isRecommended = false;
+  let recommendationReason = '';
+
+  if (neighborYields.yieldPerHour <= 0) {
+    recommendationReason = 'No yield potential';
+  } else {
+    const profitThreshold = currentPrice * 0.02;
+
+    if (netProfit > profitThreshold) {
+      let yield_first_1h = 0;
+      neighborYields.neighborDetails.forEach(neighbor => {
+        const safeYieldDuration = Math.min(1, neighbor.timeRemaining);
+        yield_first_1h += neighbor.hourlyYield * safeYieldDuration;
+      });
+
+      const proposedPrice = currentPrice + (yield_first_1h * 0.8);
+      const proposedTax = calculateTaxTotals(proposedPrice);
+      const proposedNetProfit = grossProfit - proposedTax.totalTax - currentPrice;
+
+      if (proposedNetProfit > profitThreshold) {
+        recommendedPrice = proposedPrice;
+        requiredTaxPerHour = proposedTax.taxPerHour;
+        requiredTotalTax = proposedTax.totalTax;
+        requiredStakeForFullYield = requiredTotalTax;
+        netProfit = proposedNetProfit;
+        isRecommended = true;
+        recommendationReason = 'Profitable';
+      } else {
+        recommendationReason = 'Low profitability';
+        // Keep initial tax values/net profit for display consistency
+        netProfit = grossProfit - requiredTotalTax - currentPrice;
+      }
+    } else {
+      recommendationReason = 'Low profitability';
+    }
   }
 
   return {

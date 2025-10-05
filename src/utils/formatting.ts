@@ -4,6 +4,37 @@ import { logError } from './errorHandler';
 
 export const BASE_TOKEN_SYMBOL = 'STRK';
 
+export interface ReferenceConversionOptions {
+  referenceSymbol?: string;
+  referenceRate?: number | null;
+}
+
+const normalizeReferenceSymbol = (symbol?: string): string => {
+  return (symbol || BASE_TOKEN_SYMBOL).toUpperCase();
+};
+
+const applyReferenceConversion = (value: number, options?: ReferenceConversionOptions): number => {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+
+  if (!options) {
+    return value;
+  }
+
+  const referenceSymbol = normalizeReferenceSymbol(options.referenceSymbol);
+  if (referenceSymbol === BASE_TOKEN_SYMBOL) {
+    return value;
+  }
+
+  const rate = options.referenceRate;
+  if (!rate || !Number.isFinite(rate) || rate <= 0) {
+    return value;
+  }
+
+  return value * rate;
+};
+
 export const normalizeTokenAddress = (address?: string | null): string => {
   if (!address) return '';
   const trimmed = address.trim().toLowerCase();
@@ -255,6 +286,7 @@ export const convertToSTRK = (
   symbol: string,
   ratio: number | null,
   decimals = 18,
+  options?: ReferenceConversionOptions,
 ): number => {
   if (!price) return 0;
 
@@ -279,14 +311,14 @@ export const convertToSTRK = (
 
   const normalizedSymbol = symbol?.toUpperCase();
   if (!normalizedSymbol || normalizedSymbol === BASE_TOKEN_SYMBOL) {
-    return numeric;
+    return applyReferenceConversion(numeric, options);
   }
 
   if (ratio === null || ratio === undefined || ratio <= 0) {
-    return numeric;
+    return applyReferenceConversion(numeric, options);
   }
 
-  return numeric / ratio;
+  return applyReferenceConversion(numeric / ratio, options);
 };
 
 export const formatCoordinate = (num: number | string): string => {
@@ -370,6 +402,13 @@ export const formatYield = (yield_: number): string => {
   if (yield_ === 0) return '0/h';
   if (yield_ < 0.01) return '< 0.01/h';
   return `+${yield_.toFixed(2)}/h`;
+};
+
+export const convertStrkToReference = (
+  value: number,
+  options?: ReferenceConversionOptions,
+): number => {
+  return applyReferenceConversion(value, options);
 };
 
 export const convertTokenAmountToSTRK = convertToSTRK;

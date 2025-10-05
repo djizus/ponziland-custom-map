@@ -9,6 +9,7 @@ import {
   normalizeTokenAddress,
   formatTokenAmount,
   isZeroAddress,
+  convertStrkToReference,
 } from '../utils/formatting';
 import { getTokenMetadata } from '../data/tokenMetadata';
 import { calculateAuctionPrice, getElapsedSeconds } from '../utils/auctionUtils';
@@ -58,15 +59,15 @@ const SidebarHeaderComponent = memo(() => (
 ));
 
 const TabNavigationComponent = memo(({ activeTab, onTabChange, tabConfig }: {
-  activeTab: 'map' | 'analysis';
-  onTabChange: (tab: 'map' | 'analysis') => void;
-  tabConfig: Array<{ key: 'map' | 'analysis'; label: string; title: string }>;
+  activeTab: 'map' | 'analysis' | 'settings' | 'prices';
+  onTabChange: (tab: 'map' | 'analysis' | 'settings' | 'prices') => void;
+  tabConfig: Array<{ key: 'map' | 'analysis' | 'settings' | 'prices'; label: string; title: string }>;
 }) => (
   <TabNavigation>
     {tabConfig.map(tab => (
       <TabButton
         key={tab.key}
-        onClick={() => onTabChange(tab.key as any)}
+        onClick={() => onTabChange(tab.key)}
         $isActive={activeTab === tab.key}
         title={tab.title}
         style={{ flex: 1 }}
@@ -78,7 +79,7 @@ const TabNavigationComponent = memo(({ activeTab, onTabChange, tabConfig }: {
 ));
 
 interface SidebarProps {
-  activeTab: 'map' | 'analysis';
+  activeTab: 'map' | 'analysis' | 'settings' | 'prices';
   selectedLayer: MapLayer;
   selectedToken: string;
   selectedStakeToken: string;
@@ -92,13 +93,16 @@ interface SidebarProps {
   loadingSql: boolean;
   playerStats: PlayerStats;
   config: PonziLandConfig | null;
-  onTabChange: (tab: 'map' | 'analysis') => void;
+  onTabChange: (tab: 'map' | 'analysis' | 'settings' | 'prices') => void;
   onLayerChange: (layer: MapLayer) => void;
   onTokenChange: (token: string) => void;
   onStakeTokenChange: (token: string) => void;
   onShowNotOwnedChange: (show: boolean) => void;
   onDurationCapChange: (hours: number) => void;
   onPlayerSelectionChange: (address: string, isSelected: boolean) => void;
+  referenceCurrency: string;
+  referenceRate: number | null;
+  onReferenceCurrencyChange: (currency: string) => void;
 }
 
 const Sidebar = memo(({
@@ -122,31 +126,48 @@ const Sidebar = memo(({
   onStakeTokenChange,
   onShowNotOwnedChange,
   onDurationCapChange,
-  onPlayerSelectionChange
+  onPlayerSelectionChange,
+  referenceCurrency,
+  referenceRate,
+  onReferenceCurrencyChange,
 }: SidebarProps) => {
-  const formatStrkValue = useCallback((value: number, decimals = 2) => {
-    if (!Number.isFinite(value) || value === 0) {
+  const normalizedReferenceCurrency = (referenceCurrency || BASE_TOKEN_SYMBOL).toUpperCase();
+
+  const formatReferenceValue = useCallback((value: number, decimals = 2) => {
+    const converted = convertStrkToReference(value, {
+      referenceSymbol: normalizedReferenceCurrency,
+      referenceRate,
+    });
+
+    if (!Number.isFinite(converted) || converted === 0) {
       return '0';
     }
 
-    const abs = Math.abs(value);
+    const abs = Math.abs(converted);
     const dynamicDecimals = abs >= 1
       ? decimals
       : Math.min(6, Math.max(decimals, Math.ceil(-Math.log10(abs)) + 1));
 
-    return value.toLocaleString('en-US', {
+    return converted.toLocaleString('en-US', {
       minimumFractionDigits: dynamicDecimals,
       maximumFractionDigits: dynamicDecimals,
       useGrouping: false,
     });
-  }, []);
-  const formatSignedStrk = useCallback((value: number, decimals = 2) => {
-    if (!Number.isFinite(value) || value === 0) {
+  }, [normalizedReferenceCurrency, referenceRate]);
+
+  const formatSignedReference = useCallback((value: number, decimals = 2) => {
+    const converted = convertStrkToReference(value, {
+      referenceSymbol: normalizedReferenceCurrency,
+      referenceRate,
+    });
+
+    if (!Number.isFinite(converted) || converted === 0) {
       return '0';
     }
-    const sign = value > 0 ? '+' : '-';
-    return `${sign}${formatStrkValue(Math.abs(value), decimals)}`;
-  }, [formatStrkValue]);
+
+    const sign = converted > 0 ? '+' : '-';
+    return `${sign}${formatReferenceValue(Math.abs(value), decimals)}`;
+  }, [normalizedReferenceCurrency, referenceRate, formatReferenceValue]);
 
   const formatUsdValue = useCallback((value: number, decimals = 2) => {
     if (!Number.isFinite(value)) {
@@ -163,15 +184,34 @@ const Sidebar = memo(({
 
   const formatValueInToken = useCallback(
     (valueStrk: number, tokenAddress?: string, preferToken = false) => {
-      const formattedStrk = `${formatStrkValue(valueStrk, 2)} STRK`;
+      const formattedReference = `${formatReferenceValue(valueStrk, 2)} ${normalizedReferenceCurrency}`;
       const normalizedAddress = normalizeTokenAddress(tokenAddress);
+      const formatBaseAmount = (amount: number, decimals = 2) => {
+        if (!Number.isFinite(amount) || amount === 0) {
+          return '0';
+        }
+
+        const abs = Math.abs(amount);
+        const dynamicDecimals = abs >= 1
+          ? decimals
+          : Math.min(6, Math.max(decimals, Math.ceil(-Math.log10(abs)) + 1));
+
+        return amount.toLocaleString('en-US', {
+          minimumFractionDigits: dynamicDecimals,
+          maximumFractionDigits: dynamicDecimals,
+          useGrouping: false,
+        });
+      };
+
       if (!Number.isFinite(valueStrk) || !normalizedAddress) {
-        return formattedStrk;
+        return formattedReference;
       }
 
       const token = prices.find(p => normalizeTokenAddress(p.address) === normalizedAddress);
+      const baseAmountLabel = `${formatBaseAmount(valueStrk, 2)} ${BASE_TOKEN_SYMBOL}`;
+
       if (!token || token.symbol === BASE_TOKEN_SYMBOL || !token.ratio || token.ratio <= 0) {
-        return formattedStrk;
+        return preferToken ? baseAmountLabel : formattedReference;
       }
 
       const tokenAmount = valueStrk * token.ratio;
@@ -179,13 +219,18 @@ const Sidebar = memo(({
       const formattedToken = formatTokenAmount(tokenAmount, metadata?.decimals ?? 6);
 
       if (preferToken) {
-        return `${formattedToken} ${token.symbol} (${formattedStrk})`;
+        return `${formattedToken} ${token.symbol}`;
       }
 
-      return `${formattedStrk} (${formattedToken} ${token.symbol})`;
+      return `${formattedReference} (${formattedToken} ${token.symbol})`;
     },
-    [prices, formatStrkValue],
+    [prices, formatReferenceValue, normalizedReferenceCurrency],
   );
+
+  const formatPerformanceDisplay = useCallback((land: { location: number; grossReturn: number; coords: string }) => {
+    const signedValue = formatSignedReference(land.grossReturn, 1);
+    return `${signedValue} | Land ${land.location} (${land.coords})`;
+  }, [formatSignedReference]);
 
   const landTokenAddress = useMemo(() => (
     selectedTileData?.land ? normalizeTokenAddress(selectedTileData.land.token_used) : ''
@@ -200,8 +245,8 @@ const Sidebar = memo(({
   const stakingDisplay = useMemo(() => {
     if (!selectedTileData?.land) {
       return {
-        amount: `${formatStrkValue(0, 2)} STRK`,
-        burnRate: `${formatStrkValue(0, 2)} STRK/h`,
+        amount: `${formatReferenceValue(0, 2)} ${normalizedReferenceCurrency}`,
+        burnRate: `${formatReferenceValue(0, 2)} ${normalizedReferenceCurrency}/h`,
         timeRemaining: undefined as number | undefined,
       };
     }
@@ -232,35 +277,39 @@ const Sidebar = memo(({
       : (tokenIsStrk ? tokenAmount : 0);
 
     const amount = tokenIsStrk
-      ? `${formatStrkValue(effectiveStrk, 2)} STRK`
+      ? `${formatReferenceValue(effectiveStrk, 2)} ${normalizedReferenceCurrency}`
       : tokenAmount > 0 && effectiveStrk > 0
-        ? `${amountTokenStr} (${formatStrkValue(effectiveStrk, 2)} STRK)`
+        ? `${amountTokenStr} (${formatReferenceValue(effectiveStrk, 2)} ${normalizedReferenceCurrency})`
         : tokenAmount > 0
           ? amountTokenStr
-          : `${formatStrkValue(effectiveStrk, 2)} STRK`;
+          : `${formatReferenceValue(effectiveStrk, 2)} ${normalizedReferenceCurrency}`;
 
     const effectiveBurnStrk = burnRateStrk > 0
       ? burnRateStrk
       : (tokenIsStrk ? burnRateToken : 0);
 
+    const formattedBurnEffective = formatReferenceValue(effectiveBurnStrk, 2);
+
     const burnRate = tokenIsStrk
-      ? `${formatStrkValue(effectiveBurnStrk, 2)} STRK/h`
+      ? `${formattedBurnEffective} ${normalizedReferenceCurrency}/h`
       : burnRateToken > 0 && effectiveBurnStrk > 0
-        ? `${burnTokenStr} (${formatStrkValue(effectiveBurnStrk, 2)} STRK)/h`
+        ? `${burnTokenStr} (${formattedBurnEffective} ${normalizedReferenceCurrency})/h`
         : burnRateToken > 0
           ? `${burnTokenStr}/h`
-          : `${formatStrkValue(effectiveBurnStrk, 2)} STRK/h`;
+          : `${formattedBurnEffective} ${normalizedReferenceCurrency}/h`;
 
     return {
       amount,
       burnRate,
       timeRemaining,
     };
-  }, [selectedTileData, landTokenAddress, prices, formatStrkValue]);
+  }, [selectedTileData, landTokenAddress, prices, formatReferenceValue, normalizedReferenceCurrency]);
   // Memoize tab configuration to avoid recreation
   const tabConfig = useMemo(() => [
     { key: 'map' as const, label: '🗺️', title: 'Map & Data' },
-    { key: 'analysis' as const, label: '📊', title: 'Analysis & Details' }
+    { key: 'analysis' as const, label: '📊', title: 'Analysis & Details' },
+    { key: 'prices' as const, label: '💹', title: 'Token Prices' },
+    { key: 'settings' as const, label: '⚙️', title: 'Settings' }
   ], []);
 
   // Memoize sorted prices (include all tokens)
@@ -272,6 +321,15 @@ const Sidebar = memo(({
       return (a.ratio || 0) - (b.ratio || 0);
     })
   , [prices]);
+  const usdcAvailable = useMemo(() => {
+    const token = prices.find(p => (p.symbol || '').toUpperCase() === 'USDC');
+    return !!(token?.ratio && token.ratio > 0);
+  }, [prices]);
+
+  const currencyOptions = useMemo(() => ([
+    { symbol: 'STRK', disabled: false },
+    { symbol: 'USDC', disabled: !usdcAvailable },
+  ]), [usdcAvailable]);
 
   // Memoize player list with selection state
   const playerListItems = useMemo(() =>
@@ -430,34 +488,6 @@ const Sidebar = memo(({
                     </LayerOption>
                   </ControlGroup>
                 )}
-                <ControlGroup>
-                  <h4 style={{ margin: '0 0 8px 0', fontSize: '12px', color: '#ccc' }}>HOLDING DURATION</h4>
-                  <DurationControls>
-                    <InfoLabel style={{ display: 'block', marginBottom: '6px' }}>
-                      Max Holding Duration: {durationCapHours}h
-                    </InfoLabel>
-                    <input
-                      type="range"
-                      min="2"
-                      max="48"
-                      step="1"
-                      value={durationCapHours}
-                      onChange={(e) => onDurationCapChange(Number(e.target.value))}
-                      style={{
-                        width: '100%',
-                        height: '4px',
-                        background: 'rgba(255, 255, 255, 0.2)',
-                        outline: 'none',
-                        borderRadius: '2px',
-                        cursor: 'pointer'
-                      }}
-                    />
-                    <DurationOptions>
-                      <span>2h</span>
-                      <span>48h</span>
-                    </DurationOptions>
-                  </DurationControls>
-                </ControlGroup>
                 {/* Land Owners Section */}
                 <ControlGroup>
                   <h4 style={{ margin: '0 0 8px 0', fontSize: '12px', color: '#ccc' }}>LAND OWNERS</h4>
@@ -497,8 +527,8 @@ const Sidebar = memo(({
                       <InfoLine style={{ marginBottom: '4px' }}>
                         <InfoLabel>Yield / Hour:</InfoLabel>
                         <InfoValue>
-                          {formatStrkValue(playerStats.totalYieldPerHour, 2)} STRK/h
-                          {playerStats.totalYieldPerHourUSD !== null && (
+                          {formatReferenceValue(playerStats.totalYieldPerHour, 2)} {normalizedReferenceCurrency}/h
+                          {playerStats.totalYieldPerHourUSD !== null && normalizedReferenceCurrency === BASE_TOKEN_SYMBOL && (
                             <span style={{ marginLeft: '6px', color: '#bbb' }}>
                               (≈ {formatUsdValue(playerStats.totalYieldPerHourUSD, 2)}/h)
                             </span>
@@ -507,16 +537,16 @@ const Sidebar = memo(({
                       </InfoLine>
                       <InfoLine style={{ marginBottom: '4px' }}>
                         <InfoLabel>Portfolio Value:</InfoLabel>
-                        <InfoValue>{formatStrkValue(playerStats.totalPortfolioValue, 1)} STRK</InfoValue>
+                        <InfoValue>{formatReferenceValue(playerStats.totalPortfolioValue, 1)} {normalizedReferenceCurrency}</InfoValue>
                       </InfoLine>
                       <InfoLine style={{ marginBottom: '4px' }}>
                         <InfoLabel>Staked Value:</InfoLabel>
-                        <InfoValue>{formatStrkValue(playerStats.totalStakedValue, 1)} STRK</InfoValue>
+                        <InfoValue>{formatReferenceValue(playerStats.totalStakedValue, 1)} {normalizedReferenceCurrency}</InfoValue>
                       </InfoLine>
                       <InfoLine style={{ marginBottom: '4px' }}>
                         <InfoLabel>Total Yield:</InfoLabel>
                         <InfoValue style={{ color: playerStats.totalYield > 0 ? '#4CAF50' : '#ff6b6b' }}>
-                          {formatSignedStrk(playerStats.totalYield, 1)} STRK
+                          {formatSignedReference(playerStats.totalYield, 1)} {normalizedReferenceCurrency}
                         </InfoValue>
                       </InfoLine>
                     </div>
@@ -528,7 +558,7 @@ const Sidebar = memo(({
                         <InfoLine style={{ marginBottom: '4px' }}>
                           <InfoLabel>Best Land:</InfoLabel>
                           <InfoValue style={{ color: '#4CAF50' }}>
-                            {playerStats.bestPerformingLand.display}
+                            {formatPerformanceDisplay(playerStats.bestPerformingLand)}
                           </InfoValue>
                         </InfoLine>
                       )}
@@ -536,7 +566,7 @@ const Sidebar = memo(({
                         <InfoLine style={{ marginBottom: '4px' }}>
                           <InfoLabel>Worst Land:</InfoLabel>
                           <InfoValue style={{ color: '#ff6b6b' }}>
-                            {playerStats.worstPerformingLand.display}
+                            {formatPerformanceDisplay(playerStats.worstPerformingLand)}
                           </InfoValue>
                         </InfoLine>
                       )}
@@ -559,7 +589,11 @@ const Sidebar = memo(({
                   </ControlGroup>
                 )}
 
-                {/* Token Prices Section */}
+              </ControlsSection>
+            )}
+
+            {activeTab === 'prices' && (
+              <ControlsSection>
                 <ControlGroup>
                   <h4 style={{ margin: '0 0 8px 0', fontSize: '12px', color: '#ccc' }}>TOKEN PRICES</h4>
                   <TokenList>
@@ -578,6 +612,70 @@ const Sidebar = memo(({
                       </LoadingMessage>
                     )}
                   </TokenList>
+                </ControlGroup>
+              </ControlsSection>
+            )}
+
+            {activeTab === 'settings' && (
+              <ControlsSection>
+                <ControlGroup>
+                  <h4 style={{ margin: '0 0 8px 0', fontSize: '12px', color: '#ccc' }}>REFERENCE CURRENCY</h4>
+                  <LayerSelector>
+                    {currencyOptions.map(({ symbol: currency, disabled }) => (
+                      <LayerOption
+                        key={currency}
+                        $isSelected={normalizedReferenceCurrency === currency}
+                        style={disabled ? { opacity: 0.5 } : undefined}
+                      >
+                        <CompactCheckbox
+                          type="radio"
+                          name="reference-currency"
+                          checked={normalizedReferenceCurrency === currency}
+                          onChange={() => !disabled && onReferenceCurrencyChange(currency)}
+                          disabled={disabled}
+                        />
+                        {currency}
+                        {disabled && currency !== 'STRK' && (
+                          <span style={{ marginLeft: '6px', fontSize: '10px', color: '#bbb' }}>No price data</span>
+                        )}
+                      </LayerOption>
+                    ))}
+                  </LayerSelector>
+                  <p style={{ margin: '8px 0 0 0', fontSize: '11px', color: '#888' }}>
+                    Choose the currency used for price and yield displays. Settings persist per browser.
+                  </p>
+                </ControlGroup>
+
+                <ControlGroup>
+                  <h4 style={{ margin: '0 0 8px 0', fontSize: '12px', color: '#ccc' }}>MAX HOLDING DURATION</h4>
+                  <DurationControls>
+                    <InfoLabel style={{ display: 'block', marginBottom: '6px' }}>
+                      Holding horizon: {durationCapHours} hours
+                    </InfoLabel>
+                    <input
+                      type="range"
+                      min="2"
+                      max="48"
+                      step="1"
+                      value={durationCapHours}
+                      onChange={(e) => onDurationCapChange(Number(e.target.value))}
+                      style={{
+                        width: '100%',
+                        height: '4px',
+                        background: 'rgba(255, 255, 255, 0.2)',
+                        outline: 'none',
+                        borderRadius: '2px',
+                        cursor: 'pointer'
+                      }}
+                    />
+                    <DurationOptions>
+                      <span>2h</span>
+                      <span>48h</span>
+                    </DurationOptions>
+                  </DurationControls>
+                  <p style={{ margin: '8px 0 0 0', fontSize: '11px', color: '#888' }}>
+                    Adjusts purchase recommendations, yields, and ROI calculations across the app.
+                  </p>
                 </ControlGroup>
               </ControlsSection>
             )}
@@ -668,7 +766,7 @@ const Sidebar = memo(({
                                     </InfoLine>
                                     <InfoLine>
                                       <span>Max Yield ({durationCapHours}h):</span>
-                                      <span style={{ color: '#4CAF50' }}>{formatStrkValue(recommendation.maxYield, 1)} STRK</span>
+                                      <span style={{ color: '#4CAF50' }}>{formatReferenceValue(recommendation.maxYield, 1)} {normalizedReferenceCurrency}</span>
                                     </InfoLine>
                                     <InfoLine>
                                       <span>Recommended Price:</span>
@@ -693,7 +791,7 @@ const Sidebar = memo(({
                                     <InfoLine>
                                       <span>Net Profit:</span>
                                       <span style={{ color: netProfit > 0 ? '#4CAF50' : '#ff6b6b' }}>
-                                        {formatSignedStrk(netProfit, 1)} STRK
+                                        {formatSignedReference(netProfit, 1)} {normalizedReferenceCurrency}
                                       </span>
                                     </InfoLine>
                                   </>
@@ -721,19 +819,19 @@ const Sidebar = memo(({
                                       <InfoLine>
                                         <span>Price:</span>
                                         <span style={{ color: 'white' }}>
-                                          {currentAuctionPrice !== undefined ? `${formatStrkValue(currentAuctionPrice, 2)} STRK` : 'N/A'}
+                                          {currentAuctionPrice !== undefined ? `${formatReferenceValue(currentAuctionPrice, 2)} ${normalizedReferenceCurrency}` : 'N/A'}
                                         </span>
                                       </InfoLine>
                                       <InfoLine>
                                         <span>Gross Return:</span>
                                         <span style={{ color: grossReturnForDisplay > 0 ? '#4CAF50' : '#ff6b6b' }}>
-                                          {formatSignedStrk(grossReturnForDisplay, 1)} STRK
+                                          {formatSignedReference(grossReturnForDisplay, 1)} {normalizedReferenceCurrency}
                                         </span>
                                       </InfoLine>
                                       <InfoLine>
                                         <span>Yield/Hour:</span>
                                         <span style={{ color: selectedTileData.auctionYieldInfo.yieldPerHour > 0 ? '#4CAF50' : '#ff6b6b' }}>
-                                          {formatSignedStrk(selectedTileData.auctionYieldInfo.yieldPerHour, 1)}/h
+                                          {formatSignedReference(selectedTileData.auctionYieldInfo.yieldPerHour, 1)} {normalizedReferenceCurrency}/h
                                         </span>
                                       </InfoLine>
                                       {selectedTileData.auctionROI !== undefined && (
@@ -759,10 +857,10 @@ const Sidebar = memo(({
                                       </InfoLine>
                                     </>
                                   ) : (
-                                      <InfoLine>
-                                        <span>Price:</span>
-                                        <span>{currentAuctionPrice !== undefined ? `${formatStrkValue(currentAuctionPrice, 2)} STRK` : 'N/A'}</span>
-                                      </InfoLine>
+                                    <InfoLine>
+                                      <span>Price:</span>
+                                      <span>{currentAuctionPrice !== undefined ? `${formatReferenceValue(currentAuctionPrice, 2)} ${normalizedReferenceCurrency}` : 'N/A'}</span>
+                                    </InfoLine>
                                   )}
                                 </div>
                               </>
@@ -774,7 +872,7 @@ const Sidebar = memo(({
                                     <span>Price:</span>
                                     <span style={{ color: 'white' }}>
                                       {selectedTileData.land.sell_price ? 
-                                        `${formatStrkValue(selectedTileData.landPriceSTRK, 2)} STRK` : 
+                                        `${formatReferenceValue(selectedTileData.landPriceSTRK, 2)} ${normalizedReferenceCurrency}` : 
                                         'Not for sale'
                                       }
                                     </span>
@@ -782,13 +880,13 @@ const Sidebar = memo(({
                                   <InfoLine>
                                     <span>Gross Return:</span>
                                     <span style={{ color: (selectedTileData.yieldInfo.totalYield + selectedTileData.landPriceSTRK) > 0 ? '#4CAF50' : '#ff6b6b'}}>
-                                      {formatSignedStrk(selectedTileData.yieldInfo.totalYield + selectedTileData.landPriceSTRK, 1)} STRK
+                                      {formatSignedReference(selectedTileData.yieldInfo.totalYield + selectedTileData.landPriceSTRK, 1)} {normalizedReferenceCurrency}
                                     </span>
                                   </InfoLine>
                                   <InfoLine>
                                     <span>Yield/Hour:</span>
                                     <span style={{ color: selectedTileData.yieldInfo.yieldPerHour > 0 ? '#4CAF50' : '#ff6b6b'}}>
-                                      {formatSignedStrk(selectedTileData.yieldInfo.yieldPerHour, 1)}/h
+                                      {formatSignedReference(selectedTileData.yieldInfo.yieldPerHour, 1)} {normalizedReferenceCurrency}/h
                                     </span>
                                   </InfoLine>
                                   {selectedTileData.landPriceSTRK > 0 && (

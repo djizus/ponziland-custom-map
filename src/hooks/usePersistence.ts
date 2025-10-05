@@ -6,11 +6,12 @@ export const usePersistence = (
   selectedLayer: MapLayer,
   hideNotRecommended: boolean,
   isSidebarCollapsed: boolean,
-  activeTab: 'map' | 'analysis',
+  activeTab: 'map' | 'analysis' | 'settings' | 'prices',
   durationCapHours: number,
   selectedToken: string,
   selectedStakeToken: string,
-  showNotOwned: boolean
+  showNotOwned: boolean,
+  referenceCurrency: string,
 ) => {
   // Persistence effects - save state changes to localStorage
   useEffect(() => {
@@ -48,4 +49,8 @@ export const usePersistence = (
   useEffect(() => {
     localStorage.setItem('ponziland-show-not-owned', JSON.stringify(showNotOwned));
   }, [showNotOwned]);
+
+  useEffect(() => {
+    localStorage.setItem('ponziland-reference-currency', JSON.stringify(referenceCurrency));
+  }, [referenceCurrency]);
 };

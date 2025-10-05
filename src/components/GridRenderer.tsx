@@ -31,6 +31,8 @@ interface GridRendererProps {
   zoom: number;
   config: PonziLandConfig | null;
   onTileClick: (tileDetails: SelectedTileDetails) => void;
+  referenceCurrency: string;
+  referenceRate: number | null;
 }
 
 interface InternalTileProps {
@@ -53,6 +55,8 @@ interface InternalTileProps {
   durationCapHours: number;
   config: PonziLandConfig | null;
   onTileClick: (tileDetails: SelectedTileDetails) => void;
+  referenceCurrency: string;
+  referenceRate: number | null;
 }
 
 const TILE_SIZE = 100;
@@ -72,6 +76,8 @@ const GridRenderer = memo(({
   zoom,
   config: _config,
   onTileClick,
+  referenceCurrency,
+  referenceRate,
 }: GridRendererProps) => {
   const { tileProps, gridWidth, gridHeight } = useMemo(() => {
     if (!activeTileLocations.length) {
@@ -125,6 +131,8 @@ const GridRenderer = memo(({
           durationCapHours,
           config: _config,
           onTileClick,
+          referenceCurrency,
+          referenceRate,
         });
       }
     }
@@ -147,6 +155,8 @@ const GridRenderer = memo(({
     tokenInfoCache,
     neighborCache,
     onTileClick,
+    referenceCurrency,
+    referenceRate,
   ]);
 
   return (
