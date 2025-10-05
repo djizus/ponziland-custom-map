@@ -573,7 +573,7 @@ export const calculatePurchaseRecommendation = (
 
     // Calculate required tax payments - accounting for when each neighbor gets nuked
     requiredTaxPerHour = recommendedPrice * myTaxRate;
-    let requiredTotalTax = 0;
+    requiredTotalTax = 0;
     
     // Calculate tax paid to each neighbor until they get nuked
     neighbors.forEach(neighborLoc => {

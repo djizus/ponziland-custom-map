@@ -430,36 +430,34 @@ const Sidebar = memo(({
                     </LayerOption>
                   </ControlGroup>
                 )}
-                {selectedLayer === 'purchasing' && (
-                  <ControlGroup>
-                    <h4 style={{ margin: '0 0 8px 0', fontSize: '12px', color: '#ccc' }}>HOLDING DURATION</h4>
-                    <DurationControls>
-                      <InfoLabel style={{ display: 'block', marginBottom: '6px' }}>
-                        Max Holding Duration: {durationCapHours}h
-                      </InfoLabel>
-                      <input
-                        type="range"
-                        min="2"
-                        max="48"
-                        step="1"
-                        value={durationCapHours}
-                        onChange={(e) => onDurationCapChange(Number(e.target.value))}
-                        style={{
-                          width: '100%',
-                          height: '4px',
-                          background: 'rgba(255, 255, 255, 0.2)',
-                          outline: 'none',
-                          borderRadius: '2px',
-                          cursor: 'pointer'
-                        }}
-                      />
-                      <DurationOptions>
-                        <span>2h</span>
-                        <span>48h</span>
-                      </DurationOptions>
-                    </DurationControls>
-                  </ControlGroup>
-                )}
+                <ControlGroup>
+                  <h4 style={{ margin: '0 0 8px 0', fontSize: '12px', color: '#ccc' }}>HOLDING DURATION</h4>
+                  <DurationControls>
+                    <InfoLabel style={{ display: 'block', marginBottom: '6px' }}>
+                      Max Holding Duration: {durationCapHours}h
+                    </InfoLabel>
+                    <input
+                      type="range"
+                      min="2"
+                      max="48"
+                      step="1"
+                      value={durationCapHours}
+                      onChange={(e) => onDurationCapChange(Number(e.target.value))}
+                      style={{
+                        width: '100%',
+                        height: '4px',
+                        background: 'rgba(255, 255, 255, 0.2)',
+                        outline: 'none',
+                        borderRadius: '2px',
+                        cursor: 'pointer'
+                      }}
+                    />
+                    <DurationOptions>
+                      <span>2h</span>
+                      <span>48h</span>
+                    </DurationOptions>
+                  </DurationControls>
+                </ControlGroup>
                 {/* Land Owners Section */}
                 <ControlGroup>
                   <h4 style={{ margin: '0 0 8px 0', fontSize: '12px', color: '#ccc' }}>LAND OWNERS</h4>
