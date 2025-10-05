@@ -54,7 +54,7 @@ const useAuctionCalculations = (
       };
     }
 
-    const currentAuctionPriceForTileDisplay = calculateAuctionPrice(auction);
+    const currentAuctionPriceForTileDisplay = calculateAuctionPrice(auction, config ?? undefined);
     
     // Create calculation context
     const context: LandCalculationContext = {
