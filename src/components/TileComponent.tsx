@@ -370,13 +370,28 @@ const TileComponent = memo(({
   }, [onTileClick, currentTileDetails]);
 
   // Check if this tile should be hidden (shown as empty)
-  const baseShouldShowAsEmpty = (selectedLayer === 'yield' && hideNotRecommended && 
-    land && !tileData.isRecommendedForPurchase) ||
-    (selectedLayer === 'token' && normalizedSelectedToken && land && (
-      showNotOwned ? landTokenAddress === normalizedSelectedToken : landTokenAddress !== normalizedSelectedToken
-    ));
+  const isPurchasingLayer = selectedLayer === 'yield';
+  const isLowProfitTile = isPurchasingLayer && !!land && (
+    tileData.netProfit <= 0 ||
+    (!tileData.isRecommendedForPurchase && [
+      'Low profitability',
+      'No yield potential',
+      'No profitable neighbors',
+    ].includes(tileData.purchaseRecommendation?.recommendationReason || ''))
+  );
 
-  const shouldShowAsEmpty = (isRecentlyChanged || isEventFocus) ? false : baseShouldShowAsEmpty;
+  const tokenFilterHidesTile = selectedLayer === 'token' && normalizedSelectedToken && land && (
+    showNotOwned ? landTokenAddress === normalizedSelectedToken : landTokenAddress !== normalizedSelectedToken
+  );
+
+  const purchaseFilterHidesTile = isPurchasingLayer && hideNotRecommended && 
+    land && !tileData.isRecommendedForPurchase;
+
+  let shouldShowAsEmpty = tokenFilterHidesTile || purchaseFilterHidesTile || isLowProfitTile;
+
+  if (!tokenFilterHidesTile && !isLowProfitTile && (isRecentlyChanged || isEventFocus)) {
+    shouldShowAsEmpty = false;
+  }
 
   return (
     <Tile
