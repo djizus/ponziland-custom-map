@@ -340,6 +340,8 @@ export const calculateNeighborYields = (
     timeRemaining: number;
     totalYieldFromThisNeighbor: number;
     symbol: string;
+    ratio: number | null;
+    decimals: number;
   }>;
 } => {
   return performanceCache.getNeighborYield(
@@ -360,6 +362,8 @@ export const calculateNeighborYields = (
     timeRemaining: number;
     totalYieldFromThisNeighbor: number;
     symbol: string;
+    ratio: number | null;
+    decimals: number;
   }>;
 
   neighbors.forEach(neighborLoc => {
@@ -392,7 +396,9 @@ export const calculateNeighborYields = (
           hourlyYield: neighborHourlyTax,
           timeRemaining: neighborTimeRemaining,
           totalYieldFromThisNeighbor,
-          symbol: neighborSymbol
+          symbol: neighborSymbol,
+          ratio: neighborRatio ?? null,
+          decimals: neighborDecimals ?? 6,
         });
       }
     }
@@ -609,7 +615,9 @@ export const calculatePurchaseRecommendation = (
         hourlyYield: n.hourlyYield,
         timeRemaining: n.timeRemaining,
         totalYieldFromThisNeighbor: n.totalYieldFromThisNeighbor || 0,
-        symbol: n.symbol
+        symbol: n.symbol,
+        ratio: n.ratio ?? null,
+        tokenDecimals: n.decimals,
       };
       return result;
     }) as Array<{
@@ -619,6 +627,8 @@ export const calculatePurchaseRecommendation = (
       timeRemaining: number;
       totalYieldFromThisNeighbor: number;
       symbol: string;
+      ratio?: number | null;
+      tokenDecimals?: number;
     }>
       };
     }

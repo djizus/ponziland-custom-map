@@ -97,6 +97,8 @@ interface TileComponentProps {
   land: PonziLand | null;
   auction: PonziLandAuction | null;
   isHighlighted: boolean;
+  isRecentlyChanged: boolean;
+  isEventFocus: boolean;
   tokenInfoCache: Map<string, TokenInfo>;
   neighborCache: Map<number, number[]>;
   gridData: any;
@@ -113,7 +115,7 @@ interface TileComponentProps {
 }
 
 const TileComponent = memo(({ 
-  row, col, location, land, auction, isHighlighted, tokenInfoCache, neighborCache, 
+  row, col, location, land, auction, isHighlighted, isRecentlyChanged, isEventFocus, tokenInfoCache, neighborCache, 
   gridData, activeAuctions, selectedLayer, selectedToken, showNotOwned, hideNotRecommended, durationCapHours, config, onTileClick, referenceCurrency, referenceRate 
 }: TileComponentProps) => {
   // Use custom hook for expensive auction calculations
@@ -360,18 +362,21 @@ const TileComponent = memo(({
     timeRemainingHours: tileData.timeRemainingHours,
     saleTokenAmount: tileData.saleTokenAmount,
     grossReturn: tileData.grossReturn,
-  }), [location, col, row, land, auction, tileData, isHighlighted]);
+    recentlyChanged: isRecentlyChanged,
+  }), [location, col, row, land, auction, tileData, isHighlighted, isRecentlyChanged]);
 
   const handleClick = useCallback(() => {
     onTileClick(currentTileDetails);
   }, [onTileClick, currentTileDetails]);
 
   // Check if this tile should be hidden (shown as empty)
-  const shouldShowAsEmpty = (selectedLayer === 'yield' && hideNotRecommended && 
+  const baseShouldShowAsEmpty = (selectedLayer === 'yield' && hideNotRecommended && 
     land && !tileData.isRecommendedForPurchase) ||
     (selectedLayer === 'token' && normalizedSelectedToken && land && (
       showNotOwned ? landTokenAddress === normalizedSelectedToken : landTokenAddress !== normalizedSelectedToken
     ));
+
+  const shouldShowAsEmpty = (isRecentlyChanged || isEventFocus) ? false : baseShouldShowAsEmpty;
 
   return (
     <Tile
@@ -380,6 +385,8 @@ const TileComponent = memo(({
       data-col={col}
       onClick={handleClick}
       $isMyLand={isHighlighted && !shouldShowAsEmpty}
+      $isRecentChange={isRecentlyChanged}
+      $isEventFocus={isEventFocus}
       $level={getLevelNumber(land?.level)} 
       $isEmpty={!!(!land || shouldShowAsEmpty)}
       $valueColor={shouldShowAsEmpty ? '#1a1a1a' : tileData.valueColor}

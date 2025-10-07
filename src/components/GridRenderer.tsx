@@ -24,6 +24,8 @@ interface GridRendererProps {
   activeTileLocations: Array<{ row: number; col: number; location: number }>;
   selectedPlayerAddresses: Set<string>;
   selectedLayer: MapLayer;
+  focusedLocation: number | null;
+  recentChangeLocations: Set<number>;
   selectedToken: string;
   showNotOwned: boolean;
   hideNotRecommended: boolean;
@@ -44,6 +46,8 @@ interface InternalTileProps {
   land: PonziLand | null;
   auction: PonziLandAuction | null;
   isHighlighted: boolean;
+  isRecentlyChanged: boolean;
+  isEventFocus: boolean;
   tokenInfoCache: Map<string, TokenInfo>;
   neighborCache: Map<number, number[]>;
   gridData: GridRendererProps['gridData'];
@@ -69,6 +73,8 @@ const GridRenderer = memo(({
   activeTileLocations,
   selectedPlayerAddresses,
   selectedLayer,
+  focusedLocation,
+  recentChangeLocations,
   selectedToken,
   showNotOwned,
   hideNotRecommended,
@@ -110,6 +116,8 @@ const GridRenderer = memo(({
         const isHighlighted = land?.owner
           ? selectedPlayerAddresses.has(land.owner.toLowerCase())
           : false;
+        const isRecentlyChanged = recentChangeLocations.has(location);
+        const isEventFocus = focusedLocation !== null && focusedLocation === location;
 
         items.push({
           row,
@@ -120,6 +128,8 @@ const GridRenderer = memo(({
           land,
           auction,
           isHighlighted,
+          isRecentlyChanged,
+          isEventFocus,
           tokenInfoCache,
           neighborCache,
           gridData,
@@ -148,6 +158,8 @@ const GridRenderer = memo(({
     activeAuctions,
     selectedPlayerAddresses,
     selectedLayer,
+    focusedLocation,
+    recentChangeLocations,
     selectedToken,
     showNotOwned,
     hideNotRecommended,

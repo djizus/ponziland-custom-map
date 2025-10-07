@@ -77,6 +77,8 @@ export interface PurchaseRecommendation {
     timeRemaining: number;
     totalYieldFromThisNeighbor?: number;
     symbol: string;
+    ratio?: number | null;
+    tokenDecimals?: number;
   }>;
 }
 
@@ -108,4 +110,22 @@ export interface SelectedTileDetails {
   timeRemainingHours?: number;
   saleTokenAmount?: number;
   grossReturn?: number;
+  recentlyChanged?: boolean;
+}
+
+export type GameEventType = 'owner-change' | 'auction-start' | 'auction-end';
+
+export interface GameEvent {
+  id: string;
+  type: GameEventType;
+  timestamp: number;
+  detectedAt: number;
+  location: number;
+  coords: string;
+  newOwnerAddress?: string;
+  previousOwnerAddress?: string;
+  auctionStartPriceSTRK?: number;
+  auctionCurrentPriceSTRK?: number;
+  auctionFloorPriceSTRK?: number;
+  auctionStartTimeRaw?: string;
 }

@@ -1,8 +1,29 @@
 import { useMemo } from 'react';
 import { PonziLand, PonziLandAuction, PonziLandConfig, TokenPrice } from '../types/ponziland';
 import { convertToSTRK, getTokenInfoCached, type TokenInfo } from '../utils/formatting';
-import { CalculationEngine, LandCalculationContext } from '../utils/calculationEngine';
-import { calculateBurnRate } from '../utils/taxCalculations';
+import {
+  calculateBurnRate,
+  calculateNeighborYields,
+  calculateTimeRemainingHours,
+  getTaxRateCached,
+} from '../utils/taxCalculations';
+
+export interface TokenPnlSummary {
+  symbol: string;
+  ratio: number | null;
+  tokenDecimals: number;
+  hourlyIncome: number;
+  hourlyCost: number;
+  totalIncome: number;
+  totalCost: number;
+}
+
+export interface PnlTimelinePoint {
+  hour: number;
+  netStrk: number;
+  cumulativeStrk: number;
+  perToken: Record<string, number>;
+}
 
 export interface PlayerStats {
   totalLandsOwned: number;
@@ -11,6 +32,11 @@ export interface PlayerStats {
   totalYield: number;
   totalYieldPerHour: number;
   totalYieldPerHourUSD: number | null;
+  totalIncomeStrk: number;
+  totalCostStrk: number;
+  estimatedNetStrk: number;
+  tokenBreakdown: TokenPnlSummary[];
+  pnlTimeline: PnlTimelinePoint[];
   bestPerformingLand: { location: number; grossReturn: number; coords: string; display: string } | null;
   worstPerformingLand: { location: number; grossReturn: number; coords: string; display: string } | null;
   nukableRiskLands: Array<{ location: number; timeRemaining: number; coords: string; display: string }>;
@@ -24,7 +50,7 @@ export const usePlayerStats = (
   neighborCache: Map<number, number[]>,
   activeTileLocations: Array<{ row: number; col: number; location: number }>,
   prices: TokenPrice[],
-  _durationCapHours: number,
+  durationCapHours: number,
   config: PonziLandConfig | null
 ): PlayerStats => {
   return useMemo(() => {
@@ -48,6 +74,11 @@ export const usePlayerStats = (
         totalYield: 0,
         totalYieldPerHour: 0,
         totalYieldPerHourUSD: strkUsdRate ? 0 : null,
+        totalIncomeStrk: 0,
+        totalCostStrk: 0,
+        estimatedNetStrk: 0,
+        tokenBreakdown: [],
+        pnlTimeline: [],
         bestPerformingLand: null,
         worstPerformingLand: null,
         nukableRiskLands: []
@@ -59,9 +90,45 @@ export const usePlayerStats = (
     let totalStakedValue = 0;
     let totalYield = 0;
     let totalYieldPerHour = 0;
+    const safeDurationCap = Math.min(48, Math.max(1, Math.round(durationCapHours || 24)));
+    const timelineBuckets = Array.from({ length: safeDurationCap }, () => ({
+      netStrk: 0,
+      perToken: new Map<string, number>(),
+    }));
+
+    const tokenAggregation = new Map<string, TokenPnlSummary>();
+
+    const getTokenSummary = (symbol: string, ratio: number | null, tokenDecimals: number): TokenPnlSummary => {
+      const key = symbol.toUpperCase();
+      let summary = tokenAggregation.get(key);
+      if (!summary) {
+        summary = {
+          symbol: key,
+          ratio,
+          tokenDecimals,
+          hourlyIncome: 0,
+          hourlyCost: 0,
+          totalIncome: 0,
+          totalCost: 0,
+        };
+        tokenAggregation.set(key, summary);
+      } else {
+        // Preserve ratio/decimals if previous entry lacked it and new data provides it
+        if ((summary.ratio === null || summary.ratio === undefined) && ratio !== null && ratio !== undefined) {
+          summary.ratio = ratio;
+        }
+        if (!summary.tokenDecimals && tokenDecimals) {
+          summary.tokenDecimals = tokenDecimals;
+        }
+      }
+      return summary;
+    };
+
     let bestLand: { location: number; grossReturn: number; coords: string; display: string } | null = null;
     let worstLand: { location: number; grossReturn: number; coords: string; display: string } | null = null;
     const nukableRiskLands: Array<{ location: number; timeRemaining: number; coords: string; display: string }> = [];
+    let totalIncomeStrk = 0;
+    let totalCostStrk = 0;
 
     // Helper function to convert grid position to coordinates  
     const getCoordinates = (row: number, col: number): string => {
@@ -88,6 +155,8 @@ export const usePlayerStats = (
 
       // Calculate portfolio value (current ask price)
       const tokenInfo = getTokenInfoCached(land.token_used, tokenInfoCache);
+      const tokenSymbol = (tokenInfo.symbol || 'STRK').toUpperCase();
+      const tokenRatio = tokenSymbol === 'STRK' ? 1 : tokenInfo.ratio ?? null;
 
       if (land.sell_price && land.sell_price !== '0x0') {
         const landPriceSTRK = convertToSTRK(
@@ -99,18 +168,6 @@ export const usePlayerStats = (
         totalPortfolioValue += landPriceSTRK;
       }
 
-      // Calculate gross return using existing calculation engine
-      const context: LandCalculationContext = {
-        location,
-        land,
-        gridData,
-        tokenInfoCache,
-        neighborCache,
-        activeAuctions,
-        config
-      };
-
-      const yieldResult = CalculationEngine.calculateLandYield(context);
       const landPriceSTRK = land.sell_price
         ? convertToSTRK(land.sell_price, tokenInfo.symbol, tokenInfo.ratio, tokenInfo.decimals)
         : 0;
@@ -121,10 +178,139 @@ export const usePlayerStats = (
         tokenInfo.decimals,
       );
       totalStakedValue += stakedValueSTRK;
-      const grossReturn = Number(yieldResult.totalYield) + landPriceSTRK;
-      
+
+      // Detailed income & cost breakdown using duration cap horizon
+      const myBurnRate = calculateBurnRate(
+        land,
+        gridData.tiles,
+        activeAuctions,
+        tokenInfoCache,
+        neighborCache,
+        config,
+      );
+      const myTimeRemaining = calculateTimeRemainingHours(land, myBurnRate);
+      const neighborYieldDetails = calculateNeighborYields(
+        location,
+        gridData.tiles,
+        tokenInfoCache,
+        neighborCache,
+        activeAuctions,
+        true,
+        myTimeRemaining,
+        safeDurationCap,
+        config,
+      );
+
+      const myTaxRate = getTaxRateCached(land.level, Number(land.location), neighborCache, config);
+      const neighbors = neighborCache.get(location) || [];
+
+      let hourlyTaxPaid = 0;
+      let totalTaxPaid = 0;
+
+      // Incoming yields per neighbor
+      neighborYieldDetails.neighborDetails.forEach(neighbor => {
+        const hourlyYieldStrk = Number.isFinite(neighbor.hourlyYield) ? neighbor.hourlyYield : 0;
+        if (hourlyYieldStrk === 0) {
+          return;
+        }
+
+        const duration = Math.max(
+          0,
+          Math.min(
+            safeDurationCap,
+            neighbor.timeRemaining ?? safeDurationCap,
+            Number.isFinite(myTimeRemaining) ? myTimeRemaining : safeDurationCap,
+          ),
+        );
+
+        const totalYieldForNeighbor = Number.isFinite(neighbor.totalYieldFromThisNeighbor)
+          ? neighbor.totalYieldFromThisNeighbor
+          : hourlyYieldStrk * duration;
+
+        const incomeSummary = getTokenSummary(
+          neighbor.symbol || 'STRK',
+          neighbor.symbol?.toUpperCase() === 'STRK' ? 1 : neighbor.ratio ?? null,
+          neighbor.decimals ?? 6,
+        );
+
+        incomeSummary.hourlyIncome += hourlyYieldStrk;
+        incomeSummary.totalIncome += totalYieldForNeighbor;
+
+        totalIncomeStrk += totalYieldForNeighbor;
+
+        for (let hourIndex = 0; hourIndex < safeDurationCap; hourIndex++) {
+          const span = Math.min(1, Math.max(0, duration - hourIndex));
+          if (span <= 0) break;
+
+          const bucket = timelineBuckets[hourIndex];
+          const delta = hourlyYieldStrk * span;
+          bucket.netStrk += delta;
+
+          const current = bucket.perToken.get(incomeSummary.symbol) ?? 0;
+          bucket.perToken.set(incomeSummary.symbol, current + delta);
+        }
+      });
+
+      // Outgoing taxes per neighbor
+      neighbors.forEach(neighborLoc => {
+        const neighborTile = gridData.tiles[neighborLoc];
+        if (!neighborTile || !neighborTile.owner || activeAuctions[neighborLoc]) {
+          return;
+        }
+
+        const neighborBurnRate = calculateBurnRate(
+          neighborTile,
+          gridData.tiles,
+          activeAuctions,
+          tokenInfoCache,
+          neighborCache,
+          config,
+        );
+        const neighborTimeRemaining = calculateTimeRemainingHours(neighborTile, neighborBurnRate);
+
+        if (neighborTimeRemaining <= 0) {
+          return;
+        }
+
+        const hourlyTaxForNeighbor = landPriceSTRK * myTaxRate;
+        if (hourlyTaxForNeighbor <= 0) {
+          return;
+        }
+
+        const taxDuration = Math.max(
+          0,
+          Math.min(
+            safeDurationCap,
+            neighborTimeRemaining,
+            Number.isFinite(myTimeRemaining) ? myTimeRemaining : safeDurationCap,
+          ),
+        );
+
+        const taxSummary = getTokenSummary(tokenSymbol, tokenRatio, tokenInfo.decimals ?? 18);
+        taxSummary.hourlyCost += hourlyTaxForNeighbor;
+        taxSummary.totalCost += hourlyTaxForNeighbor * taxDuration;
+
+        totalCostStrk += hourlyTaxForNeighbor * taxDuration;
+
+        for (let hourIndex = 0; hourIndex < safeDurationCap; hourIndex++) {
+          const span = Math.min(1, Math.max(0, taxDuration - hourIndex));
+          if (span <= 0) break;
+
+          const bucket = timelineBuckets[hourIndex];
+          const delta = hourlyTaxForNeighbor * span;
+          bucket.netStrk -= delta;
+
+          const current = bucket.perToken.get(taxSummary.symbol) ?? 0;
+          bucket.perToken.set(taxSummary.symbol, current - delta);
+        }
+
+        hourlyTaxPaid += hourlyTaxForNeighbor;
+        totalTaxPaid += hourlyTaxForNeighbor * taxDuration;
+      });
+
+      const grossReturn = neighborYieldDetails.totalYield - totalTaxPaid;
       totalYield += grossReturn;
-      totalYieldPerHour += Number.isFinite(yieldResult.yieldPerHour) ? yieldResult.yieldPerHour : 0;
+      totalYieldPerHour += neighborYieldDetails.yieldPerHour - hourlyTaxPaid;
 
       // Track best and worst performing lands
       const coords = getCoordinates(row, col);
@@ -157,6 +343,19 @@ export const usePlayerStats = (
       }
     });
 
+    const estimatedNetStrk = totalIncomeStrk - totalCostStrk;
+
+    let cumulative = 0;
+    const pnlTimeline: PnlTimelinePoint[] = timelineBuckets.map((bucket, index) => {
+      cumulative += bucket.netStrk;
+      return {
+        hour: index + 1,
+        netStrk: bucket.netStrk,
+        cumulativeStrk: cumulative,
+        perToken: Object.fromEntries(bucket.perToken),
+      };
+    });
+
     return {
       totalLandsOwned,
       totalPortfolioValue,
@@ -164,9 +363,14 @@ export const usePlayerStats = (
       totalYield,
       totalYieldPerHour,
       totalYieldPerHourUSD: strkUsdRate ? totalYieldPerHour * strkUsdRate : null,
+      totalIncomeStrk,
+      totalCostStrk,
+      estimatedNetStrk,
+      tokenBreakdown: Array.from(tokenAggregation.values()).sort((a, b) => (b.totalIncome - b.totalCost) - (a.totalIncome - a.totalCost)),
+      pnlTimeline,
       bestPerformingLand: bestLand,
       worstPerformingLand: worstLand,
       nukableRiskLands: nukableRiskLands.sort((a, b) => a.timeRemaining - b.timeRemaining)
     };
-  }, [selectedPlayerAddresses, gridData, activeAuctions, tokenInfoCache, neighborCache, activeTileLocations, config, prices]);
+  }, [selectedPlayerAddresses, gridData, activeAuctions, tokenInfoCache, neighborCache, activeTileLocations, config, prices, durationCapHours]);
 };

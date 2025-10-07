@@ -297,3 +297,61 @@ export const CompactCheckbox = styled.input`
   cursor: pointer;
   accent-color: ${theme.colors.primary};
 `;
+
+export const EventList = styled.div`
+  ${mixins.flexColumn}
+  gap: ${theme.spacing.sm};
+`;
+
+export const EventItem = styled.div`
+  background: ${theme.colors.background.card};
+  border-radius: ${theme.borderRadius.md};
+  padding: ${theme.spacing.sm};
+  ${mixins.flexColumn}
+  gap: ${theme.spacing.xs};
+  cursor: pointer;
+  transition: ${theme.transitions.normal};
+
+  &:hover {
+    background: ${theme.colors.background.cardHover};
+  }
+`;
+
+export const EventHeader = styled.div`
+  ${mixins.flexRow}
+  justify-content: space-between;
+  align-items: center;
+  font-size: ${theme.fontSize.sm};
+  color: ${theme.colors.text.primary};
+`;
+
+export const EventTitle = styled.span`
+  font-weight: bold;
+  color: ${theme.colors.text.primary};
+`;
+
+export const EventBadge = styled.span<{ $variant: 'owner' | 'auction' }>`
+  font-size: ${theme.fontSize.xs};
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: ${theme.borderRadius.sm};
+  background: ${props => props.$variant === 'owner' ? theme.colors.primary : theme.colors.background.selected};
+  color: ${theme.colors.text.primary};
+  text-transform: uppercase;
+`;
+
+export const EventTimestamp = styled.span`
+  font-size: ${theme.fontSize.xs};
+  color: ${theme.colors.text.muted};
+`;
+
+export const EventBody = styled.div`
+  font-size: ${theme.fontSize.sm};
+  color: ${theme.colors.text.secondary};
+  line-height: 1.4;
+`;
+
+export const EventMeta = styled.div`
+  font-size: ${theme.fontSize.xs};
+  color: ${theme.colors.text.muted};
+`;

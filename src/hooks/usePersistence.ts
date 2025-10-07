@@ -6,12 +6,13 @@ export const usePersistence = (
   selectedLayer: MapLayer,
   hideNotRecommended: boolean,
   isSidebarCollapsed: boolean,
-  activeTab: 'map' | 'analysis' | 'settings' | 'prices',
+  activeTab: 'map' | 'dashboard' | 'analysis' | 'settings' | 'prices' | 'journal',
   durationCapHours: number,
   selectedToken: string,
   selectedStakeToken: string,
   showNotOwned: boolean,
   referenceCurrency: string,
+  eventHighlightHours: number,
 ) => {
   // Persistence effects - save state changes to localStorage
   useEffect(() => {
@@ -53,4 +54,8 @@ export const usePersistence = (
   useEffect(() => {
     localStorage.setItem('ponziland-reference-currency', JSON.stringify(referenceCurrency));
   }, [referenceCurrency]);
+
+  useEffect(() => {
+    localStorage.setItem('ponziland-event-highlight-hours', JSON.stringify(eventHighlightHours));
+  }, [eventHighlightHours]);
 };

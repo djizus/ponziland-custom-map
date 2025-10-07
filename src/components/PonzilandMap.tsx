@@ -7,6 +7,7 @@ import { useGameData } from '../hooks/useGameData';
 import { usePlayerManagement } from '../hooks/usePlayerManagement';
 import { usePersistence } from '../hooks/usePersistence';
 import { usePlayerStats } from '../hooks/usePlayerStats';
+import { useGameEvents } from '../hooks/useGameEvents';
 
 // Import components
 import Sidebar from './Sidebar';
@@ -52,9 +53,21 @@ const PonzilandMap = () => {
   
   // Sidebar is now always visible and non-collapsible
   
-  const [activeTab, setActiveTab] = useState<'map' | 'analysis' | 'settings' | 'prices'>(
-    () => loadPersistedState<'map' | 'analysis' | 'settings' | 'prices'>('ponziland-active-tab', 'map')
-  );
+  const [activeTab, setActiveTab] = useState<'map' | 'dashboard' | 'analysis' | 'settings' | 'prices' | 'journal'>(() => {
+    const persisted = loadPersistedState<'map' | 'dashboard' | 'analysis' | 'settings' | 'prices' | 'journal'>(
+      'ponziland-active-tab',
+      'map'
+    );
+    const validTabs: Array<'map' | 'dashboard' | 'analysis' | 'settings' | 'prices' | 'journal'> = [
+      'map',
+      'dashboard',
+      'analysis',
+      'settings',
+      'prices',
+      'journal',
+    ];
+    return validTabs.includes(persisted) ? persisted : 'map';
+  });
   
   const [selectedTileData, setSelectedTileData] = useState<SelectedTileDetails | null>(null);
   
@@ -95,6 +108,28 @@ const PonzilandMap = () => {
   const [showNotOwned, setShowNotOwned] = useState<boolean>(
     () => loadPersistedState<boolean>('ponziland-show-not-owned', false)
   );
+
+  const [eventHighlightHours, setEventHighlightHours] = useState<number>(() => {
+    const persisted = loadPersistedState<number>('ponziland-event-highlight-hours', 6);
+    return Math.min(48, Math.max(1, persisted || 6));
+  });
+
+  const [eventClock, setEventClock] = useState<number>(() => Date.now());
+  const [focusedLocation, setFocusedLocation] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const interval = window.setInterval(() => {
+      setEventClock(Date.now());
+    }, 30000);
+
+    return () => {
+      window.clearInterval(interval);
+    };
+  }, []);
 
   const referenceRate = useMemo(() => {
     const target = referenceCurrency?.toUpperCase();
@@ -138,6 +173,28 @@ const PonzilandMap = () => {
     configSqlData
   );
 
+  const gameEvents = useGameEvents(landsSqlData, auctionsSqlData, configSqlData);
+
+  const recentEvents = useMemo(() => {
+    if (!gameEvents.length || !eventHighlightHours) {
+      return [];
+    }
+
+    const cutoff = eventClock - eventHighlightHours * 60 * 60 * 1000;
+    return gameEvents.filter(event => {
+      const detected = typeof event.detectedAt === 'number' ? event.detectedAt : event.timestamp;
+      const effective = Math.max(event.timestamp, detected);
+      return Number.isFinite(effective) && effective >= cutoff;
+    });
+  }, [gameEvents, eventHighlightHours, eventClock]);
+
+  const recentChangeLocations = useMemo(() => {
+    if (!recentEvents.length) {
+      return new Set<number>();
+    }
+    return new Set(recentEvents.map(event => event.location));
+  }, [recentEvents]);
+
   // Use persistence hook (sidebar always visible now)
   usePersistence(
     selectedPlayerAddresses,
@@ -150,6 +207,7 @@ const PonzilandMap = () => {
     selectedStakeToken,
     showNotOwned,
     referenceCurrency,
+    eventHighlightHours,
   );
 
   // Event handlers
@@ -160,7 +218,7 @@ const PonzilandMap = () => {
 
   // Sidebar toggle removed since it's always visible
 
-  const handleTabChange = useCallback((tab: 'map' | 'analysis' | 'settings' | 'prices') => {
+  const handleTabChange = useCallback((tab: 'map' | 'dashboard' | 'analysis' | 'settings' | 'prices' | 'journal') => {
     setActiveTab(tab);
   }, []);
 
@@ -180,6 +238,15 @@ const PonzilandMap = () => {
   const handleDurationCapChange = useCallback((hours: number) => {
     const clamped = Math.min(48, Math.max(2, hours));
     setDurationCapHours(clamped);
+  }, []);
+
+  const handleEventHighlightHoursChange = useCallback((hours: number) => {
+    const clamped = Math.min(48, Math.max(1, hours));
+    setEventHighlightHours(clamped);
+  }, []);
+
+  const handleEventSelect = useCallback((location: number) => {
+    setFocusedLocation(location);
   }, []);
 
   // Set document title
@@ -235,6 +302,10 @@ const PonzilandMap = () => {
         loadingSql={loadingSql}
         playerStats={playerStats}
         config={configSqlData}
+        eventLog={recentEvents}
+        eventHighlightHours={eventHighlightHours}
+        onEventSelect={handleEventSelect}
+        onEventHighlightHoursChange={handleEventHighlightHoursChange}
         onTabChange={handleTabChange}
         onLayerChange={setSelectedLayer}
         onTokenChange={setSelectedToken}
@@ -258,6 +329,8 @@ const PonzilandMap = () => {
           neighborCache={neighborCache}
           activeTileLocations={activeTileLocations}
           selectedPlayerAddresses={selectedPlayerAddresses}
+          focusedLocation={focusedLocation}
+          recentChangeLocations={recentChangeLocations}
           selectedLayer={selectedLayer}
           selectedToken={selectedToken}
           showNotOwned={showNotOwned}

@@ -3,6 +3,8 @@ import { PULSE_ANIMATION } from '../../../constants/ponziland';
 
 export const Tile = styled.div<{
   $isMyLand: boolean;
+  $isRecentChange: boolean;
+  $isEventFocus: boolean;
   $level: number;
   $isEmpty: boolean;
   $valueColor: string;
@@ -30,6 +32,13 @@ export const Tile = styled.div<{
     if (props.$isMyLand) {
       return '3px solid gold';
     }
+    if (props.$isEventFocus) {
+      return '2px solid rgba(51, 201, 255, 0.9)';
+    }
+    // TODO: remettre en surbrillance les tuiles récemment modifiées une fois la palette validée
+    // if (props.$isRecentChange) {
+    //   return '2px solid rgba(51, 201, 255, 0.5)';
+    // }
     if (props.$isAuction) {
       return '2px solid #4d2a4d'; // Medium purple border for auctions
     }
@@ -40,8 +49,15 @@ export const Tile = styled.div<{
   }};
   box-shadow: ${props => {
     if (props.$isMyLand) {
-      return '0 0 15px rgba(255, 215, 0, 0.5)';
+      const base = '0 0 15px rgba(255, 215, 0, 0.5)';
+      return props.$isEventFocus
+        ? `${base}, 0 0 12px rgba(51, 201, 255, 0.5)`
+        : base;
     }
+    if (props.$isEventFocus) {
+      return '0 0 12px rgba(51, 201, 255, 0.6), 0 0 20px rgba(51, 201, 255, 0.35)';
+    }
+    // TODO: remettre une animation spécifique pour les tuiles récentes
     if (props.$isAnalysisLayer && props.$isRecommendedForPurchase && !props.$isEmpty) {
       return '0 0 8px rgba(0, 255, 0, 0.6), 0 0 16px rgba(0, 255, 0, 0.3)'; // Green border glow for recommended purchases
     }
@@ -138,4 +154,4 @@ export const AuctionElapsedInfo = styled.div`
   border-radius: 3px;
   font-size: 9px;
   color: #fff;
-`; 
+`;
